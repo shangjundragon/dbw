@@ -64,9 +64,9 @@ func (q *DbWrapper[T]) beforeInsert(data *T) (isGeneratedTableId bool, generateT
 }
 
 // Insert 插入数据 返回受影响行数
-func (q *DbWrapper[T]) Insert(data *T) (rowsAffected int64, err error) {
+func (q *DbWrapper[T]) Insert(data *T) (result sql.Result, err error) {
 	if data == nil {
-		return 0, fmt.Errorf("entity cannot be nil")
+		return nil, fmt.Errorf("entity cannot be nil")
 	}
 
 	var isGenerateTableId bool
@@ -105,7 +105,7 @@ func (q *DbWrapper[T]) Insert(data *T) (rowsAffected int64, err error) {
 	}
 
 	if len(columns) == 0 {
-		return 0, fmt.Errorf("no fields to insert")
+		return nil, fmt.Errorf("no fields to insert")
 	}
 
 	// 构建INSERT语句
@@ -119,7 +119,7 @@ func (q *DbWrapper[T]) Insert(data *T) (rowsAffected int64, err error) {
 	if q.config.Debug {
 		q.PrintDebugSql(sqlStr, args)
 	}
-	var result sql.Result
+
 	if q.tx == nil {
 		result, err = q.config.Db.ExecContext(q.ctx, sqlStr, args...)
 	} else {
@@ -127,27 +127,27 @@ func (q *DbWrapper[T]) Insert(data *T) (rowsAffected int64, err error) {
 	}
 
 	if err != nil {
-		return 0, fmt.Errorf("insert failed: %w", err)
+		return nil, fmt.Errorf("insert failed: %w", err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return 0, fmt.Errorf("insert failed: %w", err)
+		return nil, fmt.Errorf("insert failed: %w", err)
 	}
 	if affected == 0 {
-		return 0, fmt.Errorf("insert failed: no rows affected")
+		return nil, fmt.Errorf("insert failed: no rows affected")
 	}
 	var insertId int64
 	insertId, err = result.LastInsertId()
 
 	if err != nil {
-		return 0, fmt.Errorf("insert failed: %w", err)
+		return nil, fmt.Errorf("insert failed: %w", err)
 	}
 	if q.meta.tableIdDbColumn != "" && isGenerateTableId == false {
 		// 如果没有生成主键，则将自增主键设置到实体中
 		err = editStructProp(data, q.meta.tableIdProp, insertId)
 	}
 
-	return affected, nil
+	return result, nil
 }
 
 // InsertBatch 批量插入数据 返回受影响行数
