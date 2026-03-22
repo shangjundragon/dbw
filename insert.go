@@ -8,7 +8,7 @@ import (
 )
 
 // beforeInsert 插入前处理 返回 是否生成了主键、生成的主键值
-func (q *DbWrapper[T]) beforeInsert(data *T) (isGeneratedTableId bool, generateTableId any, err error) {
+func (q *DbWrapper[T]) beforeInsert(data *T) (generateTableId any, err error) {
 	valueOf := reflect.ValueOf(data).Elem()
 	// 遍历结构体字段
 	for _, fieldInfo := range q.meta.fieldsInfoMap {
@@ -22,7 +22,7 @@ func (q *DbWrapper[T]) beforeInsert(data *T) (isGeneratedTableId bool, generateT
 				} else {
 					generateTableId = idGenerator[q.meta.idGenerator]()
 					err = editStructProp(data, fieldInfo.name, generateTableId)
-					isGeneratedTableId = true
+
 					continue
 				}
 			} else {
@@ -60,17 +60,16 @@ func (q *DbWrapper[T]) beforeInsert(data *T) (isGeneratedTableId bool, generateT
 			}
 		}
 	}
-	return isGeneratedTableId, generateTableId, err
+	return generateTableId, err
 }
 
 // Insert 插入数据 返回受影响行数
-func (q *DbWrapper[T]) Insert(data *T) (rowsAffected int64, err error) {
+func (q *DbWrapper[T]) Insert(data *T) (result sql.Result, err error) {
 	if data == nil {
-		return 0, fmt.Errorf("entity cannot be nil")
+		return nil, fmt.Errorf("entity cannot be nil")
 	}
 
-	var isGenerateTableId bool
-	isGenerateTableId, _, err = q.beforeInsert(data)
+	_, err = q.beforeInsert(data)
 
 	// 准备列名和值
 	columns := make([]string, 0, len(q.meta.fieldsInfoMap))
@@ -96,7 +95,7 @@ func (q *DbWrapper[T]) Insert(data *T) (rowsAffected int64, err error) {
 	}
 
 	if len(columns) == 0 {
-		return 0, fmt.Errorf("no fields to insert")
+		return nil, fmt.Errorf("no fields to insert")
 	}
 
 	// 构建INSERT语句
@@ -110,7 +109,7 @@ func (q *DbWrapper[T]) Insert(data *T) (rowsAffected int64, err error) {
 	if q.config.Debug {
 		q.PrintDebugSql(sqlStr, args)
 	}
-	var result sql.Result
+
 	if q.tx == nil {
 		result, err = q.config.Db.ExecContext(q.ctx, sqlStr, args...)
 	} else {
@@ -118,53 +117,43 @@ func (q *DbWrapper[T]) Insert(data *T) (rowsAffected int64, err error) {
 	}
 
 	if err != nil {
-		return 0, fmt.Errorf("insert failed: %w", err)
+		return nil, fmt.Errorf("insert failed: %w", err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return 0, fmt.Errorf("insert failed: %w", err)
+		return nil, fmt.Errorf("insert failed: %w", err)
 	}
 	if affected == 0 {
-		return 0, fmt.Errorf("insert failed: no rows affected")
-	}
-	var insertId int64
-	insertId, err = result.LastInsertId()
-
-	if err != nil {
-		return 0, fmt.Errorf("insert failed: %w", err)
-	}
-	if q.meta.tableIdDbColumn != "" && isGenerateTableId == false {
-		// 如果没有生成主键，则将自增主键设置到实体中
-		err = editStructProp(data, q.meta.tableIdProp, insertId)
+		return nil, fmt.Errorf("insert failed: no rows affected")
 	}
 
-	return affected, nil
+	return result, nil
 }
 
 // InsertBatch 批量插入数据 返回受影响行数
-func (q *DbWrapper[T]) InsertBatch(data []T) (totalAffected int64, err error) {
+func (q *DbWrapper[T]) InsertBatch(data []T) (result sql.Result, err error) {
 	if data == nil {
-		return 0, fmt.Errorf("entity cannot be nil")
+		return nil, fmt.Errorf("entity cannot be nil")
 	}
 	if q.meta.tableIdDbColumn == "" {
-		return 0, fmt.Errorf("table id column not found")
+		return nil, fmt.Errorf("table id column not found")
 	}
 
 	// 必须是生成id
 	tableIdFieldInfo := q.meta.fieldsInfoMap[q.meta.tableIdProp]
 	idType := tableIdFieldInfo.dbwTag["idType"]
 	if idType != "" && idType != "assign" {
-		return 0, fmt.Errorf("primary key type must be 'assign' when inserting multiple records")
+		return nil, fmt.Errorf("primary key type must be 'assign' when inserting multiple records")
 	}
 	var generateTableIdMap = make(map[any]string)
 	for i := range data {
 		var generateTableId any
-		_, generateTableId, err = q.beforeInsert(&data[i])
+		generateTableId, err = q.beforeInsert(&data[i])
 		generateTableIdMap[generateTableId] = "1"
 	}
 	// 检查主键是否重复
 	if len(generateTableIdMap) != len(data) {
-		return 0, fmt.Errorf("primary key must be unique when inserting multiple records")
+		return nil, fmt.Errorf("primary key must be unique when inserting multiple records")
 	}
 
 	// 准备列名和值
@@ -199,7 +188,6 @@ func (q *DbWrapper[T]) InsertBatch(data []T) (totalAffected int64, err error) {
 		q.PrintDebugSql(sqlStr, args)
 	}
 
-	var result sql.Result
 	if q.tx != nil {
 		result, err = q.tx.ExecContext(q.ctx, sqlStr, args...)
 	} else {
@@ -207,68 +195,26 @@ func (q *DbWrapper[T]) InsertBatch(data []T) (totalAffected int64, err error) {
 	}
 
 	if err != nil {
-		return 0, err
-	}
-	totalAffected, err = result.RowsAffected()
-	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
-	return totalAffected, err
+	return result, err
 
 }
 
-func (q *DbWrapper[T]) InsertBatchSplit(data []T, size int) (totalAffected int64, err error) {
+func (q *DbWrapper[T]) InsertBatchSplit(data []T, size int) (results []sql.Result, err error) {
 
 	split, err := sliceSplit(data, size)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	for i := range split {
-		var affected int64
-		affected, err = q.InsertBatch(split[i])
+		result, err := q.InsertBatch(split[i])
 		if err != nil {
-			return totalAffected, err
+			return results, err
 		}
-		totalAffected += affected
+		results = append(results, result)
 	}
-	return totalAffected, err
+	return results, err
 
-}
-
-func (q *DbWrapper[T]) InsertByMap(dataMap map[string]any) (rowsAffected int64, err error) {
-	if len(dataMap) == 0 {
-		return 0, fmt.Errorf("data map cannot be empty")
-	}
-
-	columns := make([]string, len(dataMap))
-	placeholders := make([]string, len(dataMap))
-	args := make([]any, len(dataMap))
-	for k, v := range dataMap {
-		columns = append(columns, k)
-		placeholders = append(placeholders, "?")
-		args = append(args, v)
-	}
-
-	sqlStr := fmt.Sprintf(
-		"INSERT INTO %s (%s) VALUES (%s)",
-		q.getTableName(),
-		strings.Join(columns, ", "),
-		strings.Join(placeholders, ", "),
-	)
-	if q.config.Debug {
-		q.PrintDebugSql(sqlStr, args)
-	}
-	var result sql.Result
-	if q.tx == nil {
-		result, err = q.config.Db.ExecContext(q.ctx, sqlStr, args...)
-	} else {
-		result, err = q.tx.ExecContext(q.ctx, sqlStr, args...)
-	}
-	rowsAffected, err = result.RowsAffected()
-	if err != nil {
-		return 0, err
-	}
-
-	return rowsAffected, err
 }
