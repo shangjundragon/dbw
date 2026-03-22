@@ -101,7 +101,7 @@ func (q *DbWrapper[T]) Insert(data *T) (rowsAffected int64, err error) {
 
 	// 构建INSERT语句
 	sqlStr := fmt.Sprintf(
-		"INSERT INTO %s (%s) VALUES (%s)",
+		"INSERT INTO %s (%s) VALUES (%s);",
 		q.getTableName(),
 		strings.Join(columns, ", "),
 		strings.Join(placeholders, ", "),
@@ -189,7 +189,7 @@ func (q *DbWrapper[T]) InsertBatch(data []T) (totalAffected int64, err error) {
 
 	// 构建INSERT语句
 	sqlStr := fmt.Sprintf(
-		"INSERT INTO %s (%s) VALUES (%s)",
+		"INSERT INTO %s (%s) VALUES (%s);",
 		q.getTableName(),
 		strings.Join(columns, ", "),
 		strings.Join(placeholders, "), ("),
@@ -251,7 +251,7 @@ func (q *DbWrapper[T]) InsertByMap(dataMap map[string]any) (rowsAffected int64, 
 	}
 
 	sqlStr := fmt.Sprintf(
-		"INSERT INTO %s (%s) VALUES (%s)",
+		"INSERT INTO %s (%s) VALUES (%s);",
 		q.getTableName(),
 		strings.Join(columns, ", "),
 		strings.Join(placeholders, ", "),
