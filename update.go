@@ -8,10 +8,10 @@ import (
 	"time"
 )
 
-func (q *DbWrapper[T]) UpdateById(data *T) (rowsAffected int64, err error) {
+func (q *DbWrapper[T]) UpdateById(data *T) (result sql.Result, err error) {
 
 	if q.meta.tableIdProp == "" {
-		return 0, fmt.Errorf("table id property not found")
+		return nil, fmt.Errorf("table id property not found")
 	}
 	sqlStr := strings.Builder{}
 	args := make([]any, 0)
@@ -71,7 +71,7 @@ func (q *DbWrapper[T]) UpdateById(data *T) (rowsAffected int64, err error) {
 
 	}
 	if setCount == 0 {
-		return 0, nil
+		return nil, nil
 	}
 	sqlStr.WriteString(strings.Join(sets, ", "))
 	// id 条件
@@ -87,32 +87,29 @@ func (q *DbWrapper[T]) UpdateById(data *T) (rowsAffected int64, err error) {
 	if q.config.Debug {
 		q.PrintDebugSql(sqlStr.String(), args)
 	}
-	var (
-		result sql.Result
-	)
+	var converterSql string
+	if q.config.PlaceholderConverter != nil {
+		converterSql = q.config.PlaceholderConverter(sqlStr.String())
+	}
 	if q.tx == nil {
-		result, err = q.config.Db.ExecContext(q.ctx, sqlStr.String(), args...)
+		result, err = q.config.Db.ExecContext(q.ctx, converterSql, args...)
 	} else {
-		result, err = q.tx.ExecContext(q.ctx, sqlStr.String(), args...)
+		result, err = q.tx.ExecContext(q.ctx, converterSql, args...)
 	}
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	rowsAffected, err = result.RowsAffected()
-	if err != nil {
-		return 0, err
-	}
-	return rowsAffected, nil
+	return result, nil
 }
 
 // Update 更新
-func (q *DbWrapper[T]) Update(values map[string]any) (rowsAffected int64, err error) {
+func (q *DbWrapper[T]) Update(values map[string]any) (result sql.Result, err error) {
 	if len(values) == 0 {
-		return 0, fmt.Errorf("no values to update")
+		return nil, fmt.Errorf("no values to update")
 	}
 	// 警告：没有WHERE条件的更新
 	if len(q.wheres) == 0 {
-		return 0, fmt.Errorf("update without WHERE is dangerous, use UpdateAll if you really want to update all rows")
+		return nil, fmt.Errorf("update without WHERE is dangerous, use UpdateAll if you really want to update all rows")
 	}
 	// 自动更新时间
 	if q.meta.autoUpdateTimeDbColumn != "" {
@@ -146,21 +143,20 @@ func (q *DbWrapper[T]) Update(values map[string]any) (rowsAffected int64, err er
 	if q.config.Debug {
 		q.PrintDebugSql(sqlStr.String(), args)
 	}
-	var (
-		result sql.Result
-	)
+
+	var converterSql string
+	if q.config.PlaceholderConverter != nil {
+		converterSql = q.config.PlaceholderConverter(sqlStr.String())
+	}
 	if q.tx == nil {
-		result, err = q.config.Db.ExecContext(q.ctx, sqlStr.String(), args...)
+		result, err = q.config.Db.ExecContext(q.ctx, converterSql, args...)
 	} else {
-		result, err = q.tx.ExecContext(q.ctx, sqlStr.String(), args...)
+		result, err = q.tx.ExecContext(q.ctx, converterSql, args...)
 	}
 
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	rowsAffected, err = result.RowsAffected()
-	if err != nil {
-		return 0, err
-	}
-	return rowsAffected, nil
+
+	return result, nil
 }

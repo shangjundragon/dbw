@@ -79,6 +79,9 @@ func (q *DbWrapper[T]) BuildSelect() (string, []any) {
 	} else {
 		finalSql = sqlBuilder.String()
 	}
+	if q.config.PlaceholderConverter != nil {
+		finalSql = q.config.PlaceholderConverter(finalSql)
+	}
 
 	return finalSql, args
 }

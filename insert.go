@@ -110,6 +110,10 @@ func (q *DbWrapper[T]) Insert(data *T) (result sql.Result, err error) {
 		q.PrintDebugSql(sqlStr, args)
 	}
 
+	if q.config.PlaceholderConverter != nil {
+		sqlStr = q.config.PlaceholderConverter(sqlStr)
+	}
+
 	if q.tx == nil {
 		result, err = q.config.Db.ExecContext(q.ctx, sqlStr, args...)
 	} else {
@@ -186,6 +190,10 @@ func (q *DbWrapper[T]) InsertBatch(data []T) (result sql.Result, err error) {
 	if q.config.Debug {
 
 		q.PrintDebugSql(sqlStr, args)
+	}
+
+	if q.config.PlaceholderConverter != nil {
+		sqlStr = q.config.PlaceholderConverter(sqlStr)
 	}
 
 	if q.tx != nil {

@@ -14,6 +14,25 @@ import (
 	"unicode"
 )
 
+type PlaceholderConverter func(string) string
+
+// MySQLConverter 保持 '?' 不变
+func MySQLConverter(sql string) string { return sql }
+
+func PostgreSConverter(sql string) string {
+	var buf strings.Builder
+	paramIndex := 1
+	for i := 0; i < len(sql); i++ {
+		if sql[i] == '?' {
+			fmt.Fprintf(&buf, "$%d", paramIndex)
+			paramIndex++
+		} else {
+			buf.WriteByte(sql[i])
+		}
+	}
+	return buf.String()
+}
+
 type Config struct {
 	LogicDeleteValue    string // 逻辑删除值 1表示删除了
 	LogicNotDeleteValue string // 逻辑删除值 0表示未删除
@@ -21,13 +40,15 @@ type Config struct {
 	Db                  *sql.DB
 	DriverName          string // 数据库驱动名 影响分页语句 可选：mysql、postgres、sqlite	oracle、sqlserver
 	// 分页拦截器
-	PageInterceptor func(sqlStr string, pageNum int, pageSize int) (finalSql string)
+	PageInterceptor      func(sqlStr string, pageNum int, pageSize int) (finalSql string)
+	PlaceholderConverter PlaceholderConverter
 }
 
 func NewConfig(fn func(config *Config)) *Config {
 	var c = Config{
-		LogicDeleteValue:    "1",
-		LogicNotDeleteValue: "0",
+		LogicDeleteValue:     "1",
+		LogicNotDeleteValue:  "0",
+		PlaceholderConverter: MySQLConverter,
 	}
 	fn(&c)
 

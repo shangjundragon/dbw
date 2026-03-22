@@ -7,16 +7,16 @@ import (
 )
 
 // Delete 删除 返回受影响的行数和错误
-func (q *DbWrapper[T]) Delete() (rowsAffected int64, err error) {
+func (q *DbWrapper[T]) Delete() (result sql.Result, err error) {
 	if len(q.wheres) == 0 {
-		return 0, fmt.Errorf("delete without WHERE is not allowed")
+		return nil, fmt.Errorf("delete without WHERE is not allowed")
 	}
 
 	// 逻辑删除
 	if q.meta.isLogicDelete {
 		sets := map[string]any{q.meta.logicDelDbColumn: q.config.LogicDeleteValue}
-		rowsAffected, err = q.Update(sets)
-		return rowsAffected, err
+		result, err = q.Update(sets)
+		return result, err
 	}
 	sqlStr := strings.Builder{}
 
@@ -27,7 +27,7 @@ func (q *DbWrapper[T]) Delete() (rowsAffected int64, err error) {
 	if q.config.Debug {
 		q.PrintDebugSql(sqlStr.String(), args)
 	}
-	var result sql.Result
+
 	if q.tx == nil {
 		result, err = q.config.Db.ExecContext(q.ctx, sqlStr.String(), args...)
 
@@ -35,31 +35,28 @@ func (q *DbWrapper[T]) Delete() (rowsAffected int64, err error) {
 		result, err = q.tx.ExecContext(q.ctx, sqlStr.String(), args...)
 	}
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	affected, e := result.RowsAffected()
-	if e != nil {
-		return 0, e
-	}
-	return affected, nil
+
+	return result, nil
 }
 
 // DeleteById 根据id删除
-func (q *DbWrapper[T]) DeleteById(id any) (rowsAffected int64, err error) {
+func (q *DbWrapper[T]) DeleteById(id any) (result sql.Result, err error) {
 	if q.meta.tableIdProp == "" {
-		return 0, fmt.Errorf("table id property not found")
+		return nil, fmt.Errorf("table id property not found")
 	}
 	q.Eq(q.meta.tableIdDbColumn, id)
 	return q.Delete()
 }
 
 // DeleteByIds 批量根据id删除
-func (q *DbWrapper[T]) DeleteByIds(ids []any) (rowsAffected int64, err error) {
+func (q *DbWrapper[T]) DeleteByIds(ids []any) (result sql.Result, err error) {
 	if len(ids) == 0 {
-		return 0, nil
+		return nil, nil
 	}
 	if q.meta.tableIdProp == "" {
-		return 0, fmt.Errorf("table id property not found")
+		return nil, fmt.Errorf("table id property not found")
 	}
 	q.In(q.meta.tableIdDbColumn, ids)
 	return q.Delete()

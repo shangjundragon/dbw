@@ -21,6 +21,7 @@ func init() {
 		config.Db = db
 		config.Debug = true
 		config.DriverName = "sqlite"
+		//config.PlaceholderConverter = dbw.PostgreSConverter
 	})
 
 }
@@ -40,7 +41,7 @@ type SysUser struct {
 }*/
 
 func TestSelect(t *testing.T) {
-	list, err := dbw.New[SysUser](dbw.WithConfig(config)).SelectList()
+	list, err := dbw.New[SysUser](dbw.WithConfig(config)).Eq("id", 1204737731809251328).SelectList()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -64,17 +65,8 @@ func TestInsert(t *testing.T) {
 }
 
 func TestUpdateById(t *testing.T) {
-	one, err := dbw.New[SysUser](dbw.WithConfig(config)).SelectById(3)
-	if err != nil {
-		log.Fatal(err)
-	}
-	jsonStr, err := json.Marshal(one)
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Println(string(jsonStr))
-	one.Username = ""
-	affected, err := dbw.New[SysUser](dbw.WithConfig(config)).UpdateById(&one)
+
+	affected, err := dbw.New[SysUser](dbw.WithConfig(config)).UpdateById(&SysUser{Id: 1, Username: "test"})
 	if err != nil {
 		log.Fatal(err)
 	}
