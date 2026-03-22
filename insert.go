@@ -80,19 +80,28 @@ func (q *DbWrapper[T]) Insert(data *T) (rowsAffected int64, err error) {
 	// 反射数据值
 	dataValue := reflect.ValueOf(data).Elem()
 	// 定义内部函数，用于添加列名、占位符和参数
-	appendValue := func(colName string, val any) {
+	appendValue := func(colName string, val any, placeholderSymbol string) {
 		columns = append(columns, colName)
-		placeholders = append(placeholders, "?")
+		placeholders = append(placeholders, placeholderSymbol)
 		args = append(args, val)
 	}
 
+	index := 0
 	for _, fieldInfo := range q.meta.fieldsInfoMap {
 		fieldValue := dataValue.Field(fieldInfo.index)
 		// 零值
 		if fieldValue.IsZero() {
 			continue
 		}
-		appendValue(fieldInfo.colName, fieldValue.Interface())
+
+		switch q.config.DriverName {
+		case "postgres":
+			appendValue(fieldInfo.colName, fieldValue.Interface(), fmt.Sprintf("$%d", index+1))
+		default:
+			appendValue(fieldInfo.colName, fieldValue.Interface(), "?")
+		}
+
+		index++
 	}
 
 	if len(columns) == 0 {
