@@ -105,13 +105,11 @@ func (q *DbWrapper[T]) Insert(data *T) (result sql.Result, err error) {
 		strings.Join(columns, ", "),
 		strings.Join(placeholders, ", "),
 	)
-
-	if q.config.Debug {
-		q.PrintDebugSql(sqlStr, args)
-	}
-
 	if q.config.PlaceholderConverter != nil {
 		sqlStr = q.config.PlaceholderConverter(sqlStr)
+	}
+	if q.config.Debug {
+		q.PrintDebugSql(sqlStr, args)
 	}
 
 	if q.tx == nil {
@@ -187,13 +185,11 @@ func (q *DbWrapper[T]) InsertBatch(data []T) (result sql.Result, err error) {
 		strings.Join(columns, ", "),
 		strings.Join(placeholders, "), ("),
 	)
-	if q.config.Debug {
-
-		q.PrintDebugSql(sqlStr, args)
-	}
-
 	if q.config.PlaceholderConverter != nil {
 		sqlStr = q.config.PlaceholderConverter(sqlStr)
+	}
+	if q.config.Debug {
+		q.PrintDebugSql(sqlStr, args)
 	}
 
 	if q.tx != nil {

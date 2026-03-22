@@ -83,14 +83,14 @@ func (q *DbWrapper[T]) UpdateById(data *T) (result sql.Result, err error) {
 	whereStr, whereArgs := q.BuildWhere()
 	sqlStr.WriteString(whereStr)
 	args = append(args, whereArgs...)
-
-	if q.config.Debug {
-		q.PrintDebugSql(sqlStr.String(), args)
-	}
 	var converterSql string
 	if q.config.PlaceholderConverter != nil {
 		converterSql = q.config.PlaceholderConverter(sqlStr.String())
 	}
+	if q.config.Debug {
+		q.PrintDebugSql(converterSql, args)
+	}
+
 	if q.tx == nil {
 		result, err = q.config.Db.ExecContext(q.ctx, converterSql, args...)
 	} else {
@@ -140,14 +140,14 @@ func (q *DbWrapper[T]) Update(values map[string]any) (result sql.Result, err err
 	sqlStr.WriteString(str)
 	args = append(args, anies...)
 
-	if q.config.Debug {
-		q.PrintDebugSql(sqlStr.String(), args)
-	}
-
 	var converterSql string
 	if q.config.PlaceholderConverter != nil {
 		converterSql = q.config.PlaceholderConverter(sqlStr.String())
 	}
+	if q.config.Debug {
+		q.PrintDebugSql(converterSql, args)
+	}
+
 	if q.tx == nil {
 		result, err = q.config.Db.ExecContext(q.ctx, converterSql, args...)
 	} else {

@@ -24,15 +24,19 @@ func (q *DbWrapper[T]) Delete() (result sql.Result, err error) {
 	whereStr, args := q.BuildWhere()
 	sqlStr.WriteString(whereStr)
 
+	var converterSql string
+	if q.config.PlaceholderConverter != nil {
+		converterSql = q.config.PlaceholderConverter(sqlStr.String())
+	}
 	if q.config.Debug {
-		q.PrintDebugSql(sqlStr.String(), args)
+		q.PrintDebugSql(converterSql, args)
 	}
 
 	if q.tx == nil {
-		result, err = q.config.Db.ExecContext(q.ctx, sqlStr.String(), args...)
+		result, err = q.config.Db.ExecContext(q.ctx, converterSql, args...)
 
 	} else {
-		result, err = q.tx.ExecContext(q.ctx, sqlStr.String(), args...)
+		result, err = q.tx.ExecContext(q.ctx, converterSql, args...)
 	}
 	if err != nil {
 		return nil, err
