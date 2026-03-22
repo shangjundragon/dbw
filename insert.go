@@ -8,7 +8,7 @@ import (
 )
 
 // beforeInsert 插入前处理 返回 是否生成了主键、生成的主键值
-func (q *DbWrapper[T]) beforeInsert(data *T) (isGeneratedTableId bool, generateTableId any, err error) {
+func (q *DbWrapper[T]) beforeInsert(data *T) (generateTableId any, err error) {
 	valueOf := reflect.ValueOf(data).Elem()
 	// 遍历结构体字段
 	for _, fieldInfo := range q.meta.fieldsInfoMap {
@@ -22,7 +22,6 @@ func (q *DbWrapper[T]) beforeInsert(data *T) (isGeneratedTableId bool, generateT
 				} else {
 					generateTableId = idGenerator[q.meta.idGenerator]()
 					err = editStructProp(data, fieldInfo.name, generateTableId)
-					isGeneratedTableId = true
 					continue
 				}
 			} else {
@@ -60,7 +59,7 @@ func (q *DbWrapper[T]) beforeInsert(data *T) (isGeneratedTableId bool, generateT
 			}
 		}
 	}
-	return isGeneratedTableId, generateTableId, err
+	return generateTableId, err
 }
 
 // Insert 插入数据 返回受影响行数
@@ -69,8 +68,7 @@ func (q *DbWrapper[T]) Insert(data *T) (result sql.Result, err error) {
 		return nil, fmt.Errorf("entity cannot be nil")
 	}
 
-	var isGenerateTableId bool
-	isGenerateTableId, _, err = q.beforeInsert(data)
+	_, err = q.beforeInsert(data)
 
 	// 准备列名和值
 	columns := make([]string, 0, len(q.meta.fieldsInfoMap))
@@ -129,51 +127,34 @@ func (q *DbWrapper[T]) Insert(data *T) (result sql.Result, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("insert failed: %w", err)
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return nil, fmt.Errorf("insert failed: %w", err)
-	}
-	if affected == 0 {
-		return nil, fmt.Errorf("insert failed: no rows affected")
-	}
-	var insertId int64
-	insertId, err = result.LastInsertId()
-
-	if err != nil {
-		return nil, fmt.Errorf("insert failed: %w", err)
-	}
-	if q.meta.tableIdDbColumn != "" && isGenerateTableId == false {
-		// 如果没有生成主键，则将自增主键设置到实体中
-		err = editStructProp(data, q.meta.tableIdProp, insertId)
-	}
 
 	return result, nil
 }
 
 // InsertBatch 批量插入数据 返回受影响行数
-func (q *DbWrapper[T]) InsertBatch(data []T) (totalAffected int64, err error) {
+func (q *DbWrapper[T]) InsertBatch(data []T) (result sql.Result, err error) {
 	if data == nil {
-		return 0, fmt.Errorf("entity cannot be nil")
+		return nil, fmt.Errorf("entity cannot be nil")
 	}
 	if q.meta.tableIdDbColumn == "" {
-		return 0, fmt.Errorf("table id column not found")
+		return nil, fmt.Errorf("table id column not found")
 	}
 
 	// 必须是生成id
 	tableIdFieldInfo := q.meta.fieldsInfoMap[q.meta.tableIdProp]
 	idType := tableIdFieldInfo.dbwTag["idType"]
 	if idType != "" && idType != "assign" {
-		return 0, fmt.Errorf("primary key type must be 'assign' when inserting multiple records")
+		return nil, fmt.Errorf("primary key type must be 'assign' when inserting multiple records")
 	}
 	var generateTableIdMap = make(map[any]string)
 	for i := range data {
 		var generateTableId any
-		_, generateTableId, err = q.beforeInsert(&data[i])
+		generateTableId, err = q.beforeInsert(&data[i])
 		generateTableIdMap[generateTableId] = "1"
 	}
 	// 检查主键是否重复
 	if len(generateTableIdMap) != len(data) {
-		return 0, fmt.Errorf("primary key must be unique when inserting multiple records")
+		return nil, fmt.Errorf("primary key must be unique when inserting multiple records")
 	}
 
 	// 准备列名和值
@@ -181,6 +162,7 @@ func (q *DbWrapper[T]) InsertBatch(data []T) (totalAffected int64, err error) {
 	placeholders := make([]string, 0)
 	args := make([]any, 0)
 
+	index := 0
 	for i := range data {
 		p := make([]string, 0)
 		for _, colName := range q.meta.dbColumnSlice {
@@ -190,10 +172,17 @@ func (q *DbWrapper[T]) InsertBatch(data []T) (totalAffected int64, err error) {
 			fieldName := q.meta.dbColumnFieldMap[colName]
 			fieldValue := reflect.ValueOf(&data[i]).Elem().FieldByName(fieldName)
 			args = append(args, fieldValue.Interface())
-			p = append(p, "?")
+			switch q.config.DriverName {
+			case "postgres":
+				p = append(p, fmt.Sprintf("$%d", index+1))
+			default:
+				p = append(p, "?")
+			}
+			index++
 		}
 
 		placeholders = append(placeholders, strings.Join(p, ", "))
+
 	}
 
 	// 构建INSERT语句
@@ -208,55 +197,57 @@ func (q *DbWrapper[T]) InsertBatch(data []T) (totalAffected int64, err error) {
 		q.PrintDebugSql(sqlStr, args)
 	}
 
-	var result sql.Result
 	if q.tx != nil {
 		result, err = q.tx.ExecContext(q.ctx, sqlStr, args...)
 	} else {
 		result, err = q.config.Db.ExecContext(q.ctx, sqlStr, args...)
 	}
-
 	if err != nil {
-		return 0, err
-	}
-	totalAffected, err = result.RowsAffected()
-	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
-	return totalAffected, err
+	return result, err
 
 }
 
-func (q *DbWrapper[T]) InsertBatchSplit(data []T, size int) (totalAffected int64, err error) {
+func (q *DbWrapper[T]) InsertBatchSplit(data []T, size int) (results []sql.Result, err error) {
 
 	split, err := sliceSplit(data, size)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	for i := range split {
-		var affected int64
-		affected, err = q.InsertBatch(split[i])
+		var result sql.Result
+		result, err = q.InsertBatch(split[i])
 		if err != nil {
-			return totalAffected, err
+			return results, err
 		}
-		totalAffected += affected
+		results = append(results, result)
 	}
-	return totalAffected, err
+	return results, err
 
 }
 
-func (q *DbWrapper[T]) InsertByMap(dataMap map[string]any) (rowsAffected int64, err error) {
+func (q *DbWrapper[T]) InsertByMap(dataMap map[string]any) (result sql.Result, err error) {
 	if len(dataMap) == 0 {
-		return 0, fmt.Errorf("data map cannot be empty")
+		return nil, fmt.Errorf("data map cannot be empty")
 	}
 
 	columns := make([]string, len(dataMap))
 	placeholders := make([]string, len(dataMap))
 	args := make([]any, len(dataMap))
+	index := 0
 	for k, v := range dataMap {
 		columns = append(columns, k)
-		placeholders = append(placeholders, "?")
+		switch q.config.DriverName {
+		case "postgres":
+			placeholders = append(placeholders, fmt.Sprintf("$%d", index+1))
+		default:
+			placeholders = append(placeholders, "?")
+		}
+
 		args = append(args, v)
+		index++
 	}
 
 	sqlStr := fmt.Sprintf(
@@ -268,16 +259,12 @@ func (q *DbWrapper[T]) InsertByMap(dataMap map[string]any) (rowsAffected int64, 
 	if q.config.Debug {
 		q.PrintDebugSql(sqlStr, args)
 	}
-	var result sql.Result
+
 	if q.tx == nil {
 		result, err = q.config.Db.ExecContext(q.ctx, sqlStr, args...)
 	} else {
 		result, err = q.tx.ExecContext(q.ctx, sqlStr, args...)
 	}
-	rowsAffected, err = result.RowsAffected()
-	if err != nil {
-		return 0, err
-	}
 
-	return rowsAffected, err
+	return result, err
 }
