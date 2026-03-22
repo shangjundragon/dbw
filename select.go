@@ -172,51 +172,51 @@ func (q *DbWrapper[T]) ScanOne(dest ...any) (err error) {
 	return err
 }
 
-func (q *DbWrapper[T]) SelectById(id any) (one T, err error) {
+func (q *DbWrapper[T]) SelectById(id any) (one *T, err error) {
 	var t T
 	if q.meta.tableIdProp == "" {
-		return t, fmt.Errorf("table id property not found")
+		return &t, fmt.Errorf("table id property not found")
 	}
 	q.Eq(q.meta.tableIdProp, id)
 	return q.SelectOne()
 }
 
-func (q *DbWrapper[T]) SelectOne() (T, error) {
+func (q *DbWrapper[T]) SelectOne() (*T, error) {
 	rows, err := q.query()
-	var t T
+
 	if err != nil {
-		return t, err
+		return nil, err
 	}
 	defer rows.Close()
 	slice, err := q.scanRowsToTypeSlice(rows)
 	if err != nil {
-		return t, err
+		return nil, err
 	}
 	if len(slice) > 1 {
-		return t, fmt.Errorf("expected 1 result, got %d result", len(slice))
+		return nil, fmt.Errorf("expected 1 result, got %d result", len(slice))
 	}
 	if len(slice) == 0 {
-		return t, nil
+		return nil, nil
 	}
 
-	return slice[0], err
+	return &slice[0], err
+
 }
 
-func (q *DbWrapper[T]) FindOne() (T, error) {
+func (q *DbWrapper[T]) FindOne() (*T, error) {
 	rows, err := q.query()
-	var t T
 	if err != nil {
-		return t, err
+		return nil, err
 	}
 	defer rows.Close()
 	slice, err := q.scanRowsToTypeSlice(rows)
 	if err != nil {
-		return t, err
+		return nil, err
 	}
 	if len(slice) >= 1 {
-		return slice[0], nil
+		return &slice[0], nil
 	}
-	return t, fmt.Errorf("expected, got 0 result")
+	return nil, fmt.Errorf("expected, got 0 result")
 }
 
 // ScanList 查询列表
