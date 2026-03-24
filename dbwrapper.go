@@ -88,7 +88,7 @@ func (q *DbWrapper[T]) Reset(opts ...Options) *DbWrapper[T] {
 	return n
 }
 
-// New 创建查询包装器
+// New 创建包装器
 func New[T any](opts ...Options) *DbWrapper[T] {
 	q := &DbWrapper[T]{}
 	for _, opt := range opts {
@@ -111,11 +111,6 @@ func New[T any](opts ...Options) *DbWrapper[T] {
 		q.meta = getStructMeta[T]()
 	}
 	return q
-}
-
-// NewQuery 创建查询包装器（别名，向后兼容）
-func NewQuery[T any](opts ...Options) *DbWrapper[T] {
-	return New[T](opts...)
 }
 
 func (q *DbWrapper[T]) TableName(tableName string) *DbWrapper[T] {

@@ -92,7 +92,7 @@ func TestMysqlUpdate(t *testing.T) {
 
 	fmt.Printf("成功 %v", string(marshal))
 	one.Username = "test2"
-	affected, err := dbw.New[Student](dbw.WithConfig(config)).UpdateById(&one)
+	affected, err := dbw.New[Student](dbw.WithConfig(config)).UpdateById(one)
 	if err != nil {
 		log.Fatal(err)
 	}
