@@ -143,27 +143,27 @@ func (q *DbWrapper[T]) SelectPage(pageNum int, pageSize int) (records []T, count
 	if pageSize < 1 {
 		pageSize = 10 // 默认每页 10 条
 	}
-	
+
 	// 先执行 COUNT 查询获取总数
 	count, err = q.Clone().Count()
 	if err != nil {
 		return nil, 0, fmt.Errorf("count failed: %w", err)
 	}
-	
+
 	// 如果总数为 0，直接返回空结果
 	if count == 0 {
 		return make([]T, 0), 0, nil
 	}
-	
+
 	// 设置分页参数并查询数据
 	q.pageNum = &pageNum
 	q.pageSize = &pageSize
-	
+
 	list, err := q.SelectList()
 	if err != nil {
 		return nil, 0, fmt.Errorf("select list failed: %w", err)
 	}
-	
+
 	return list, count, nil
 }
 
@@ -194,6 +194,7 @@ func (q *DbWrapper[T]) SelectById(id any) (one *T, err error) {
 	return q.SelectOne()
 }
 
+// SelectOne 查询单条 多条数据返回错误
 func (q *DbWrapper[T]) SelectOne() (*T, error) {
 	rows, err := q.query()
 
@@ -216,6 +217,7 @@ func (q *DbWrapper[T]) SelectOne() (*T, error) {
 
 }
 
+// FindOne 查询单条 多条数据返回第一条
 func (q *DbWrapper[T]) FindOne() (*T, error) {
 	rows, err := q.query()
 	if err != nil {
