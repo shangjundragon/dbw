@@ -44,8 +44,9 @@ func WithTx(tx *sql.Tx) Options {
 }
 
 type whereExpr struct {
-	sql  string //
+	sql  string // SQL 片段
 	args []any  // 参数
+	isOr bool   // 是否是 OR 条件
 }
 
 type orderExpr struct {
@@ -58,7 +59,7 @@ type Tabler interface {
 	TableName() string
 }
 
-// Reset 重置 返回新的实例 保留config meta 表名 可被opts修改
+// Reset 重置 返回新的实例 保留 config meta 表名 可被 opts 修改
 func (q *DbWrapper[T]) Reset(opts ...Options) *DbWrapper[T] {
 	n := &DbWrapper[T]{
 		config:    q.config,
@@ -68,7 +69,10 @@ func (q *DbWrapper[T]) Reset(opts ...Options) *DbWrapper[T] {
 	for _, opt := range opts {
 		opt((*DbWrapper[any])(n))
 	}
-	if n.config == nil || q.config.Db == nil {
+	if n.config == nil {
+		n.config = GetDefaultConfig()
+	}
+	if n.config.Db == nil {
 		panic("database not properly configured")
 	}
 	if n.ctx == nil {
@@ -91,7 +95,10 @@ func New[T any](opts ...Options) *DbWrapper[T] {
 		opt((*DbWrapper[any])(q))
 	}
 
-	if q.config == nil || q.config.Db == nil {
+	if q.config == nil {
+		q.config = GetDefaultConfig()
+	}
+	if q.config.Db == nil {
 		panic("database not properly configured")
 	}
 	if q.ctx == nil {
@@ -104,6 +111,11 @@ func New[T any](opts ...Options) *DbWrapper[T] {
 		q.meta = getStructMeta[T]()
 	}
 	return q
+}
+
+// NewQuery 创建查询包装器（别名，向后兼容）
+func NewQuery[T any](opts ...Options) *DbWrapper[T] {
+	return New[T](opts...)
 }
 
 func (q *DbWrapper[T]) TableName(tableName string) *DbWrapper[T] {

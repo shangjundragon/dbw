@@ -136,25 +136,35 @@ func (q *DbWrapper[T]) ScanPage(pageNum int, pageSize int, scanner func(*sql.Row
 }
 
 func (q *DbWrapper[T]) SelectPage(pageNum int, pageSize int) (records []T, count int64, err error) {
-	count, err = q.Count()
-	if err != nil {
-		return nil, 0, err
-	}
-
+	// 参数验证
 	if pageNum < 1 {
 		pageNum = 1
 	}
-	if pageSize < 0 {
-		pageSize = 0
+	if pageSize < 1 {
+		pageSize = 10 // 默认每页 10 条
 	}
+	
+	// 先执行 COUNT 查询获取总数
+	count, err = q.Clone().Count()
+	if err != nil {
+		return nil, 0, fmt.Errorf("count failed: %w", err)
+	}
+	
+	// 如果总数为 0，直接返回空结果
+	if count == 0 {
+		return make([]T, 0), 0, nil
+	}
+	
+	// 设置分页参数并查询数据
 	q.pageNum = &pageNum
 	q.pageSize = &pageSize
-
+	
 	list, err := q.SelectList()
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("select list failed: %w", err)
 	}
-	return list, count, err
+	
+	return list, count, nil
 }
 
 // ScanOne 查询单条

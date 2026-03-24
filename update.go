@@ -25,7 +25,7 @@ func (q *DbWrapper[T]) UpdateById(data *T) (result sql.Result, err error) {
 		setCount++
 	}
 	for _, fieldInfo := range q.meta.fieldsInfoMap {
-		// 跳过ID和逻辑删除字段
+		// 跳过 ID、逻辑删除字段和忽略字段
 		if fieldInfo.dbIgnore || fieldInfo.name == q.meta.tableIdFiledName || fieldInfo.name == q.meta.logicDelFiledName {
 			continue
 		}
@@ -40,34 +40,33 @@ func (q *DbWrapper[T]) UpdateById(data *T) (result sql.Result, err error) {
 		}
 
 		fieldValue := elem.Field(fieldInfo.index)
-		// 处理非零值的情况
-		if !fieldValue.IsZero() {
-			appendSet(fieldInfo.dbColumn, fieldValue.Interface())
-			continue
-		}
 
-		// 下面是处理零值的情况
+		// 检查是否有默认值标签
+		defaultValue, hasDefault := fieldInfo.dbwTag["default"]
 
-		// 指针类型
+		// 指针类型：只有明确设置了值（非 nil）才更新
 		if fieldValue.Kind() == reflect.Ptr {
-			// 更新策略为总是参与更新
-			if fieldInfo.dbwTag["tableUpdateStrategy"] == "always" {
+			if !fieldValue.IsNil() {
+				appendSet(fieldInfo.dbColumn, fieldValue.Interface())
+			} else if fieldInfo.dbwTag["tableUpdateStrategy"] == "always" {
+				// 策略为总是参与更新，设置为 nil
 				appendSet(fieldInfo.dbColumn, nil)
 			}
 		} else {
-			// 值类型
-			// 更新策略为总是参与更新
-			if fieldInfo.dbwTag["tableUpdateStrategy"] == "always" {
-				defaultZeroValue, has := fieldInfo.dbwTag["default"]
-				if has {
-					// 有默认值
-					appendSet(fieldInfo.dbColumn, defaultZeroValue)
+			// 值类型：非零值或者零值但有默认值标签时更新
+			if !fieldValue.IsZero() {
+				appendSet(fieldInfo.dbColumn, fieldValue.Interface())
+			} else if fieldInfo.dbwTag["tableUpdateStrategy"] == "always" {
+				// 策略为总是参与更新
+				if hasDefault {
+					// 有默认值则使用默认值
+					appendSet(fieldInfo.dbColumn, defaultValue)
 				} else {
+					// 否则使用零值
 					appendSet(fieldInfo.dbColumn, fieldValue.Interface())
 				}
 			}
 		}
-
 	}
 
 	if setCount == 0 {

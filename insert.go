@@ -19,33 +19,38 @@ func (q *DbWrapper[T]) beforeInsert(data *T) (generateTableId any, err error) {
 		if fieldInfo.dbColumn == q.meta.tableIdDbColumn {
 			if fieldValue.IsZero() {
 				generateTableId = idGenerator[q.meta.idGenerator]()
-				err = editStructProp(data, fieldInfo.name, generateTableId)
+				// 直接设置字段值
+				fieldValue.Set(reflect.ValueOf(generateTableId))
 			}
 			continue
 		}
 
 		// 创建时间处理
 		if autoCreateTime := fieldInfo.dbwTag["autoCreateTime"]; autoCreateTime != "" {
-			err = editStructProp(data, fieldInfo.name, getTime(autoCreateTime))
+			val := getTime(autoCreateTime)
+			fieldValue.Set(reflect.ValueOf(val))
 			continue
 		}
 
 		// 更新时间处理
 		if autoUpdateTime := fieldInfo.dbwTag["autoUpdateTime"]; autoUpdateTime != "" {
-			err = editStructProp(data, fieldInfo.name, getTime(autoUpdateTime))
+			val := getTime(autoUpdateTime)
+			fieldValue.Set(reflect.ValueOf(val))
 			continue
 		}
 
 		// 逻辑删除值处理
 		if q.meta.logicDelDbColumn != "" && fieldInfo.dbColumn == q.meta.logicDelDbColumn {
-			err = editStructProp(data, fieldInfo.name, q.config.LogicNotDeleteValue)
+			fieldValue.Set(reflect.ValueOf(q.config.LogicNotDeleteValue))
 			continue
 		}
 
 		// 零值处理 - 设置默认值
 		if fieldValue.IsZero() {
 			if defaultValue, has := fieldInfo.dbwTag["default"]; has {
-				err = editStructProp(data, fieldInfo.name, defaultValue)
+				// 转换默认值为合适的类型
+				convertedVal := convertDefaultValue(defaultValue, fieldValue.Type())
+				fieldValue.Set(reflect.ValueOf(convertedVal))
 			}
 		}
 	}
@@ -78,7 +83,7 @@ func (q *DbWrapper[T]) Insert(data *T) (result sql.Result, err error) {
 			continue
 		}
 		fieldValue := dataValue.Field(fieldInfo.index)
-		// 跳过零值和忽略字段
+		// 跳过零值（主键和时间字段已在 beforeInsert 中处理）
 		if fieldValue.IsZero() {
 			continue
 		}
@@ -148,17 +153,20 @@ func (q *DbWrapper[T]) InsertBatch(data []T) (result sql.Result, err error) {
 		return nil, fmt.Errorf("primary key type must be 'assign' when inserting multiple records")
 	}
 
-	// 生成主键并检查重复
+	// 生成主键并检查重复（仅当使用自动 ID 生成器时）
 	generateTableIdMap := make(map[any]struct{}, len(data))
 	for i := range data {
 		generateTableId, err := q.beforeInsert(&data[i])
 		if err != nil {
 			return nil, fmt.Errorf("before insert failed: %w", err)
 		}
-		if _, exists := generateTableIdMap[generateTableId]; exists {
-			return nil, fmt.Errorf("primary key must be unique when inserting multiple records")
+		// 只有生成了新的 ID 才检查重复
+		if generateTableId != nil {
+			if _, exists := generateTableIdMap[generateTableId]; exists {
+				return nil, fmt.Errorf("primary key must be unique when inserting multiple records")
+			}
+			generateTableIdMap[generateTableId] = struct{}{}
 		}
-		generateTableIdMap[generateTableId] = struct{}{}
 	}
 
 	// 预分配切片容量

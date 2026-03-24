@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -67,16 +66,30 @@ func NewConfig(fn func(config *Config)) *Config {
 var (
 	snowFlake       *Snowflake
 	structMetaCache sync.Map // map[reflect.Type]*structMeta
-	//config          *Config
-	idGenerator = map[string]func() any{
+	idGenerator     = map[string]func() any{
 		"snowflake":    func() any { return GetSnowflake().GetId() },
 		"snowflakeStr": func() any { return fmt.Sprintf("%d", GetSnowflake().GetId()) },
 	}
+	// defaultConfig 默认配置（用于向后兼容）
+	defaultConfig *Config
 )
 
-// RegisterIdGenerator 注册ID生成器
+// RegisterIdGenerator 注册 ID 生成器
 func RegisterIdGenerator(key string, fn func() any) {
 	idGenerator[key] = fn
+}
+
+// InitConfig 初始化默认配置（向后兼容）
+func InitConfig(fn func(config *Config)) {
+	defaultConfig = NewConfig(fn)
+}
+
+// GetDefaultConfig 获取默认配置
+func GetDefaultConfig() *Config {
+	if defaultConfig == nil {
+		panic("default config not initialized, please call InitConfig first")
+	}
+	return defaultConfig
 }
 
 // getTime 根据时间标签获取时间
@@ -212,328 +225,6 @@ func GetFloat64Ptr(f float64) *float64 {
 	return &f
 }
 
-func editStructProp[T any](obj *T, fieldName string, newValue any) error {
-	if obj == nil {
-		return errors.New("object is nil")
-	}
-
-	// 获取对象的反射值
-	v := reflect.ValueOf(obj).Elem()
-
-	// 检查是否是结构体
-	if v.Kind() != reflect.Struct {
-		return errors.New("obj must be a struct")
-	}
-
-	// 获取字段
-	field := v.FieldByName(fieldName)
-	if !field.IsValid() {
-		return errors.New("field not found")
-	}
-
-	// 检查字段是否可设置
-	if !field.CanSet() {
-		return errors.New("field cannot be set")
-	}
-
-	// 获取字段类型
-	fieldType := field.Type()
-
-	// 检查字段类型是否在允许的范围内
-	if !isAllowedType(fieldType) {
-		return fmt.Errorf("field type %s is not allowed, only int, int64, *int, *int64, string, *string, time.Time, *time.Time are allowed", fieldType)
-	}
-
-	// 处理不同类型的赋值
-	return assignValue(field, newValue)
-}
-
-// 检查类型是否在允许的范围内
-func isAllowedType(t reflect.Type) bool {
-	switch t.Kind() {
-	case reflect.Int, reflect.Int64, reflect.String:
-		return true
-	case reflect.Struct:
-		// 检查是否是 time.Time 类型
-		return t == reflect.TypeOf(time.Time{})
-	case reflect.Ptr:
-		elemType := t.Elem()
-		return elemType.Kind() == reflect.Int ||
-			elemType.Kind() == reflect.Int64 ||
-			elemType.Kind() == reflect.String ||
-			elemType == reflect.TypeOf(time.Time{})
-	default:
-		return false
-	}
-}
-
-// 赋值函数，处理类型转换
-func assignValue(field reflect.Value, newValue any) error {
-	fieldType := field.Type()
-
-	// 获取基础类型（如果是指针类型，则获取指向的类型）
-	var baseType reflect.Type
-	if fieldType.Kind() == reflect.Ptr {
-		baseType = fieldType.Elem()
-	} else {
-		baseType = fieldType
-	}
-
-	// 处理nil值
-	if newValue == nil {
-		if fieldType.Kind() == reflect.Ptr {
-			field.Set(reflect.Zero(fieldType))
-			return nil
-		}
-		return errors.New("cannot set nil to non-pointer field")
-	}
-
-	// 根据字段的基础类型处理
-	switch baseType.Kind() {
-	case reflect.Int, reflect.Int64:
-		// 尝试将新值转换为数字
-		numValue, err := convertToNumber(newValue, baseType.Kind())
-		if err != nil {
-			return fmt.Errorf("cannot convert newValue to %s: %v", baseType.Kind(), err)
-		}
-
-		if fieldType.Kind() == reflect.Ptr {
-			// 创建指针并赋值
-			ptr := reflect.New(fieldType.Elem())
-			ptr.Elem().Set(numValue)
-			field.Set(ptr)
-		} else {
-
-			field.Set(numValue)
-		}
-		return nil
-
-	case reflect.String:
-		// 尝试将新值转换为字符串
-		strValue, err := convertToString(newValue)
-		if err != nil {
-			return fmt.Errorf("cannot convert newValue to string: %v", err)
-		}
-
-		if fieldType.Kind() == reflect.Ptr {
-			// 创建指针并赋值
-			ptr := reflect.New(fieldType.Elem())
-			ptr.Elem().Set(strValue)
-			field.Set(ptr)
-		} else {
-			field.Set(strValue)
-		}
-		return nil
-
-	case reflect.Struct:
-		// 检查是否是 time.Time 类型
-		if baseType == reflect.TypeOf(time.Time{}) {
-			timeValue, err := convertToTime(newValue)
-			if err != nil {
-				return fmt.Errorf("cannot convert newValue to time.Time: %v", err)
-			}
-
-			if fieldType.Kind() == reflect.Ptr {
-				// 创建指针并赋值
-				ptr := reflect.New(fieldType.Elem())
-				ptr.Elem().Set(timeValue)
-				field.Set(ptr)
-			} else {
-				field.Set(timeValue)
-			}
-			return nil
-		}
-		return fmt.Errorf("unsupported struct type: %s", baseType)
-
-	default:
-		return fmt.Errorf("unsupported base type: %s", baseType.Kind())
-	}
-}
-
-// 转换为数字类型
-func convertToNumber(value any, targetType reflect.Kind) (reflect.Value, error) {
-	switch v := value.(type) {
-	case int:
-		if targetType == reflect.Int64 {
-			return reflect.ValueOf(int64(v)), nil
-		}
-		return reflect.ValueOf(v), nil
-
-	case int64:
-		if targetType == reflect.Int {
-			return reflect.ValueOf(int(v)), nil
-		}
-		return reflect.ValueOf(v), nil
-
-	case *int:
-		if v == nil {
-			return reflect.Value{}, errors.New("nil pointer")
-		}
-		if targetType == reflect.Int64 {
-			return reflect.ValueOf(int64(*v)), nil
-		}
-		return reflect.ValueOf(*v), nil
-
-	case *int64:
-		if v == nil {
-			return reflect.Value{}, errors.New("nil pointer")
-		}
-		if targetType == reflect.Int {
-			return reflect.ValueOf(int(*v)), nil
-		}
-		return reflect.ValueOf(*v), nil
-
-	case string:
-		// 尝试将字符串转换为数字
-		if targetType == reflect.Int {
-			intVal, err := strconv.Atoi(v)
-			if err != nil {
-				// 尝试解析为int64，然后转换为int
-				int64Val, err := strconv.ParseInt(v, 10, 64)
-				if err != nil {
-					return reflect.Value{}, fmt.Errorf("cannot convert string '%s' to int: %v", v, err)
-				}
-				return reflect.ValueOf(int(int64Val)), nil
-			}
-			return reflect.ValueOf(intVal), nil
-		} else if targetType == reflect.Int64 {
-			int64Val, err := strconv.ParseInt(v, 10, 64)
-			if err != nil {
-				return reflect.Value{}, fmt.Errorf("cannot convert string '%s' to int64: %v", v, err)
-			}
-			return reflect.ValueOf(int64Val), nil
-		}
-
-	case *string:
-		if v == nil {
-			return reflect.Value{}, errors.New("nil pointer")
-		}
-		// 递归调用，解引用字符串指针
-		return convertToNumber(*v, targetType)
-
-	default:
-		// 尝试使用反射进行转换
-		vv := reflect.ValueOf(value)
-		if vv.Type().ConvertibleTo(reflect.TypeOf(int(0))) {
-			intVal := vv.Convert(reflect.TypeOf(int(0))).Interface().(int)
-			if targetType == reflect.Int64 {
-				return reflect.ValueOf(int64(intVal)), nil
-			}
-			return reflect.ValueOf(intVal), nil
-		}
-	}
-
-	return reflect.Value{}, fmt.Errorf("unsupported type for number conversion: %T", value)
-}
-
-// 转换为字符串类型
-func convertToString(value any) (reflect.Value, error) {
-	switch v := value.(type) {
-	case string:
-		return reflect.ValueOf(v), nil
-
-	case *string:
-		if v == nil {
-			return reflect.Value{}, errors.New("nil pointer")
-		}
-		return reflect.ValueOf(*v), nil
-
-	case int:
-		return reflect.ValueOf(strconv.Itoa(v)), nil
-
-	case int64:
-		return reflect.ValueOf(strconv.FormatInt(v, 10)), nil
-
-	case *int:
-		if v == nil {
-			return reflect.Value{}, errors.New("nil pointer")
-		}
-		return reflect.ValueOf(strconv.Itoa(*v)), nil
-
-	case *int64:
-		if v == nil {
-			return reflect.Value{}, errors.New("nil pointer")
-		}
-		return reflect.ValueOf(strconv.FormatInt(*v, 10)), nil
-
-	case time.Time:
-		return reflect.ValueOf(v.Format(time.RFC3339)), nil
-
-	case *time.Time:
-		if v == nil {
-			return reflect.Value{}, errors.New("nil pointer")
-		}
-		return reflect.ValueOf(v.Format(time.RFC3339)), nil
-
-	default:
-		// 尝试使用fmt.Sprintf转换
-		return reflect.ValueOf(fmt.Sprintf("%v", value)), nil
-	}
-}
-
-// 转换为 time.Time 类型
-func convertToTime(value any) (reflect.Value, error) {
-	switch v := value.(type) {
-	case time.Time:
-		return reflect.ValueOf(v), nil
-
-	case *time.Time:
-		if v == nil {
-			return reflect.Value{}, errors.New("nil pointer")
-		}
-		return reflect.ValueOf(*v), nil
-
-	case string:
-		// 尝试多种时间格式进行解析
-		formats := []string{
-			time.RFC3339,
-			time.RFC3339Nano,
-			"2006-01-02 15:04:05",
-			"2006-01-02",
-			time.RFC1123,
-			time.RFC822,
-		}
-
-		var err error
-		for _, format := range formats {
-			t, err := time.Parse(format, v)
-			if err == nil {
-				return reflect.ValueOf(t), nil
-			}
-		}
-		return reflect.Value{}, fmt.Errorf("cannot parse time string '%s', tried formats: %v", v, err)
-
-	case *string:
-		if v == nil {
-			return reflect.Value{}, errors.New("nil pointer")
-		}
-		return convertToTime(*v)
-
-	case int:
-		// 假设为Unix时间戳（秒）
-		return reflect.ValueOf(time.Unix(int64(v), 0)), nil
-
-	case int64:
-		// 假设为Unix时间戳（秒）
-		return reflect.ValueOf(time.Unix(v, 0)), nil
-
-	case float64:
-		// 处理浮点数时间戳（可能包含毫秒/微秒）
-		sec := int64(v)
-		nsec := int64((v - float64(sec)) * 1e9)
-		return reflect.ValueOf(time.Unix(sec, nsec)), nil
-
-	default:
-		// 尝试通过反射获取底层值
-		rv := reflect.ValueOf(value)
-		if rv.Type().ConvertibleTo(reflect.TypeOf(int64(0))) {
-			int64Val := rv.Convert(reflect.TypeOf(int64(0))).Interface().(int64)
-			return reflect.ValueOf(time.Unix(int64Val, 0)), nil
-		}
-		return reflect.Value{}, fmt.Errorf("unsupported type for time conversion: %T", value)
-	}
-}
-
 func sliceSplit[T any](sli []T, size int) ([][]T, error) {
 	// 参数校验
 	if size <= 0 {
@@ -559,4 +250,36 @@ func sliceSplit[T any](sli []T, size int) ([][]T, error) {
 	}
 
 	return result, nil
+}
+
+// convertDefaultValue 转换默认值为合适的类型
+func convertDefaultValue(defaultValue string, targetType reflect.Type) any {
+	// 如果是指针类型，先获取元素类型
+	if targetType.Kind() == reflect.Ptr {
+		targetType = targetType.Elem()
+	}
+
+	switch targetType.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		if num, err := strconv.Atoi(defaultValue); err == nil {
+			return num
+		}
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		if num, err := strconv.ParseUint(defaultValue, 10, 64); err == nil {
+			return num
+		}
+	case reflect.Float32, reflect.Float64:
+		if num, err := strconv.ParseFloat(defaultValue, 64); err == nil {
+			return num
+		}
+	case reflect.Bool:
+		if b, err := strconv.ParseBool(defaultValue); err == nil {
+			return b
+		}
+	case reflect.String:
+		return defaultValue
+	default:
+		return defaultValue
+	}
+	return defaultValue
 }

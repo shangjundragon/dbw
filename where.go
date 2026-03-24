@@ -5,7 +5,15 @@ import (
 	"strings"
 )
 
-// BuildWhere 构建where条件
+// whereCondition 表示一个 WHERE 条件
+type whereCondition struct {
+	sql      string   // SQL 片段
+	args     []any    // 参数
+	isOr     bool     // 是否是 OR 条件
+	nested   bool     // 是否是嵌套条件
+}
+
+// BuildWhere 构建 where 条件
 func (q *DbWrapper[T]) BuildWhere() (whereStr string, args []any) {
 	str := strings.Builder{}
 	args = make([]any, 0)
@@ -14,9 +22,8 @@ func (q *DbWrapper[T]) BuildWhere() (whereStr string, args []any) {
 
 		for i, w := range q.wheres {
 			if i > 0 {
-
-				_, has := q.whereIsOrIndexes[i]
-				if has {
+				// 根据前一个条件的 isOr 标志决定使用 AND 还是 OR
+				if q.wheres[i-1].isOr {
 					str.WriteString(" OR ")
 				} else {
 					str.WriteString(" AND ")
@@ -38,7 +45,10 @@ func (q *DbWrapper[T]) Or() *DbWrapper[T] {
 }
 
 func (q *DbWrapper[T]) OrNest(f func(*DbWrapper[T])) *DbWrapper[T] {
-	q.Or()
+	// 先标记需要 OR
+	if len(q.wheres) > 0 {
+		q.wheres[len(q.wheres)-1].isOr = true
+	}
 	qw := DbWrapper[T]{}
 	f(&qw)
 	str, args := qw.BuildWhere()
@@ -65,14 +75,7 @@ func (q *DbWrapper[T]) And(w func(*DbWrapper[T])) *DbWrapper[T] {
 	return q
 }
 
-func (q *DbWrapper[T]) AndIf(c bool, w func(*DbWrapper[T])) *DbWrapper[T] {
-	if !c {
-		return q
-	}
-	return q.And(w)
-}
-
-// Where WHERE条件
+// Where WHERE 条件
 func (q *DbWrapper[T]) Where(sql string, args ...any) *DbWrapper[T] {
 	q.wheres = append(q.wheres, whereExpr{sql: sql, args: args})
 	return q
@@ -84,6 +87,14 @@ func (q *DbWrapper[T]) WhereIf(cond bool, sql string, args ...any) *DbWrapper[T]
 		q.Where(sql, args...)
 	}
 	return q
+}
+
+// AndIf 条件判断 AND
+func (q *DbWrapper[T]) AndIf(c bool, w func(*DbWrapper[T])) *DbWrapper[T] {
+	if !c {
+		return q
+	}
+	return q.And(w)
 }
 
 // Eq 等于
