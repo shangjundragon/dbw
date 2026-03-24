@@ -177,10 +177,10 @@ func (q *DbWrapper[T]) ScanOne(dest ...any) (err error) {
 
 func (q *DbWrapper[T]) SelectById(id any) (one *T, err error) {
 	var t T
-	if q.meta.tableIdProp == "" {
+	if q.meta.tableIdFiledName == "" {
 		return &t, fmt.Errorf("table id property not found")
 	}
-	q.Eq(q.meta.tableIdProp, id)
+	q.Eq(q.meta.tableIdFiledName, id)
 	return q.SelectOne()
 }
 

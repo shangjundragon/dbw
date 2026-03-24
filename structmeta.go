@@ -27,8 +27,8 @@ type structMeta struct {
 
 	dbColumnSlice []string // 数据库列名（小写）切片
 
-	tableIdProp     string // 表id属性名
-	tableIdDbColumn string // 表id数据库列名
+	tableIdFiledName string // 表id属性名
+	tableIdDbColumn  string // 表id数据库列名
 
 	logicDelFiledName string // 逻辑删除属性名
 	logicDelDbColumn  string // 逻辑删除属性数据库列名
@@ -146,7 +146,7 @@ func getStructMeta[T any]() *structMeta {
 	}
 
 	// 循环完毕，如果未找到主键，则检查是否有一个名为Id的字段
-	if meta.tableIdProp == "" {
+	if meta.tableIdFiledName == "" {
 		field, b := typeOf.FieldByName("Id")
 		if b {
 			setIdMeta(meta, field)
@@ -154,7 +154,7 @@ func getStructMeta[T any]() *structMeta {
 	}
 
 	structMetaCache.Store(typeOf, meta)
-	if meta.tableIdProp == "" {
+	if meta.tableIdFiledName == "" {
 		fmt.Printf("%v table id property not found\n", typeOf)
 	}
 	return meta
@@ -185,6 +185,6 @@ func setIdMeta(meta *structMeta, field reflect.StructField) {
 	default:
 		panic(fmt.Sprintf("unsupported id type: %s only int, int64, uint64, string", fieldType))
 	}
-	meta.tableIdProp = field.Name
+	meta.tableIdFiledName = field.Name
 	meta.tableIdDbColumn = camelToSnake(field.Name)
 }

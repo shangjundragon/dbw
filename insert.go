@@ -138,7 +138,7 @@ func (q *DbWrapper[T]) InsertBatch(data []T) (result sql.Result, err error) {
 	}
 
 	// 验证主键类型
-	tableIdFieldInfo := q.meta.fieldsInfoMap[q.meta.tableIdProp]
+	tableIdFieldInfo := q.meta.fieldsInfoMap[q.meta.tableIdFiledName]
 	idType := tableIdFieldInfo.dbwTag["idType"]
 	if idType != "" && idType != "assign" {
 		return nil, fmt.Errorf("primary key type must be 'assign' when inserting multiple records")

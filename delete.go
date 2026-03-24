@@ -47,7 +47,7 @@ func (q *DbWrapper[T]) Delete() (result sql.Result, err error) {
 
 // DeleteById 根据id删除
 func (q *DbWrapper[T]) DeleteById(id any) (result sql.Result, err error) {
-	if q.meta.tableIdProp == "" {
+	if q.meta.tableIdFiledName == "" {
 		return nil, fmt.Errorf("table id property not found")
 	}
 	q.Eq(q.meta.tableIdDbColumn, id)
@@ -59,7 +59,7 @@ func (q *DbWrapper[T]) DeleteByIds(ids []any) (result sql.Result, err error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	if q.meta.tableIdProp == "" {
+	if q.meta.tableIdFiledName == "" {
 		return nil, fmt.Errorf("table id property not found")
 	}
 	q.In(q.meta.tableIdDbColumn, ids)

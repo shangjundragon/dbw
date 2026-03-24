@@ -10,7 +10,7 @@ import (
 
 func (q *DbWrapper[T]) UpdateById(data *T) (result sql.Result, err error) {
 
-	if q.meta.tableIdProp == "" {
+	if q.meta.tableIdFiledName == "" {
 		return nil, fmt.Errorf("table id property not found")
 	}
 	sqlStr := strings.Builder{}
@@ -26,14 +26,13 @@ func (q *DbWrapper[T]) UpdateById(data *T) (result sql.Result, err error) {
 	}
 	for _, fieldInfo := range q.meta.fieldsInfoMap {
 		// 跳过ID和逻辑删除字段
-		if fieldInfo.name == q.meta.tableIdProp || fieldInfo.name == q.meta.logicDelFiledName {
+		if fieldInfo.name == q.meta.tableIdFiledName || fieldInfo.name == q.meta.logicDelFiledName {
 			continue
 		}
 		// 自动更新时间
 		if fieldInfo.dbwTag["autoUpdateTime"] != "" {
 			if fieldInfo.dbwTag["autoUpdateTime"] == "milli" {
 				appendSet(fieldInfo.colName, time.Now().UnixMilli())
-
 			} else {
 				appendSet(fieldInfo.colName, time.Now())
 			}
@@ -41,11 +40,13 @@ func (q *DbWrapper[T]) UpdateById(data *T) (result sql.Result, err error) {
 		}
 
 		fieldValue := elem.Field(fieldInfo.index)
-		// 非零值
+		// 处理非零值的情况
 		if !fieldValue.IsZero() {
 			appendSet(fieldInfo.colName, fieldValue.Interface())
 			continue
 		}
+
+		// 下面是处理零值的情况
 
 		// 指针类型
 		if fieldValue.Kind() == reflect.Ptr {
@@ -53,15 +54,13 @@ func (q *DbWrapper[T]) UpdateById(data *T) (result sql.Result, err error) {
 			if fieldInfo.dbwTag["tableUpdateStrategy"] == "always" {
 				appendSet(fieldInfo.colName, nil)
 			}
-		}
-
-		// 非指针类型
-		if fieldValue.Kind() != reflect.Ptr {
+		} else {
+			// 值类型
 			// 更新策略为总是参与更新
 			if fieldInfo.dbwTag["tableUpdateStrategy"] == "always" {
-				// 默认值
 				defaultZeroValue, has := fieldInfo.dbwTag["default"]
 				if has {
+					// 有默认值
 					appendSet(fieldInfo.colName, defaultZeroValue)
 				} else {
 					appendSet(fieldInfo.colName, fieldValue.Interface())
@@ -70,12 +69,14 @@ func (q *DbWrapper[T]) UpdateById(data *T) (result sql.Result, err error) {
 		}
 
 	}
+
 	if setCount == 0 {
-		return nil, nil
+		return nil, fmt.Errorf("no fields for set")
 	}
+
 	sqlStr.WriteString(strings.Join(sets, ", "))
-	// id 条件
-	q.Eq(q.meta.tableIdDbColumn, elem.FieldByName(q.meta.tableIdProp).Interface())
+	// 根据拼接id条件
+	q.Eq(q.meta.tableIdDbColumn, elem.FieldByName(q.meta.tableIdFiledName).Interface())
 	// 逻辑删除条件
 	q.AndIf(q.meta.logicDelDbColumn != "", func(w *DbWrapper[T]) {
 		w.Eq(q.meta.logicDelDbColumn, q.config.LogicNotDeleteValue)
@@ -109,7 +110,7 @@ func (q *DbWrapper[T]) Update(values map[string]any) (result sql.Result, err err
 	}
 	// 警告：没有WHERE条件的更新
 	if len(q.wheres) == 0 {
-		return nil, fmt.Errorf("update without WHERE is dangerous, use UpdateAll if you really want to update all rows")
+		return nil, fmt.Errorf("update without WHERE is dangerous， please add WHERE condition")
 	}
 	// 自动更新时间
 	if q.meta.autoUpdateTimeDbColumn != "" {
@@ -135,10 +136,10 @@ func (q *DbWrapper[T]) Update(values map[string]any) (result sql.Result, err err
 	q.AndIf(q.meta.logicDelDbColumn != "", func(w *DbWrapper[T]) {
 		w.Eq(q.meta.logicDelDbColumn, q.config.LogicNotDeleteValue)
 	})
-	// WHERE
-	str, anies := q.BuildWhere()
-	sqlStr.WriteString(str)
-	args = append(args, anies...)
+	// WHERE部分的sql和参数
+	whereSqlStr, whereArgs := q.BuildWhere()
+	sqlStr.WriteString(whereSqlStr)
+	args = append(args, whereArgs...)
 
 	var converterSql string
 	if q.config.PlaceholderConverter != nil {
