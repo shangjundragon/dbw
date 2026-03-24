@@ -13,7 +13,7 @@ func (q *DbWrapper[T]) Delete() (result sql.Result, err error) {
 	}
 
 	// 逻辑删除
-	if q.meta.isLogicDelete {
+	if q.meta.logicDelDbColumn != "" {
 		sets := map[string]any{q.meta.logicDelDbColumn: q.config.LogicDeleteValue}
 		result, err = q.Update(sets)
 		return result, err

@@ -26,7 +26,7 @@ func (q *DbWrapper[T]) UpdateById(data *T) (result sql.Result, err error) {
 	}
 	for _, fieldInfo := range q.meta.fieldsInfoMap {
 		// 跳过ID和逻辑删除字段
-		if fieldInfo.name == q.meta.tableIdProp || fieldInfo.name == q.meta.logicDelProp {
+		if fieldInfo.name == q.meta.tableIdProp || fieldInfo.name == q.meta.logicDelFiledName {
 			continue
 		}
 		// 自动更新时间
@@ -77,7 +77,7 @@ func (q *DbWrapper[T]) UpdateById(data *T) (result sql.Result, err error) {
 	// id 条件
 	q.Eq(q.meta.tableIdDbColumn, elem.FieldByName(q.meta.tableIdProp).Interface())
 	// 逻辑删除条件
-	q.AndIf(q.meta.isLogicDelete, func(w *DbWrapper[T]) {
+	q.AndIf(q.meta.logicDelDbColumn != "", func(w *DbWrapper[T]) {
 		w.Eq(q.meta.logicDelDbColumn, q.config.LogicNotDeleteValue)
 	})
 	whereStr, whereArgs := q.BuildWhere()
@@ -132,7 +132,7 @@ func (q *DbWrapper[T]) Update(values map[string]any) (result sql.Result, err err
 	}
 	sqlStr.WriteString(strings.Join(sets, ", "))
 	// 逻辑删除
-	q.AndIf(q.meta.isLogicDelete, func(w *DbWrapper[T]) {
+	q.AndIf(q.meta.logicDelDbColumn != "", func(w *DbWrapper[T]) {
 		w.Eq(q.meta.logicDelDbColumn, q.config.LogicNotDeleteValue)
 	})
 	// WHERE

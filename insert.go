@@ -37,7 +37,7 @@ func (q *DbWrapper[T]) beforeInsert(data *T) (generateTableId any, err error) {
 		}
 
 		// 逻辑删除值处理
-		if q.meta.isLogicDelete && fieldInfo.colName == q.meta.logicDelDbColumn {
+		if q.meta.logicDelDbColumn != "" && fieldInfo.colName == q.meta.logicDelDbColumn {
 			err = editStructProp(data, fieldInfo.name, q.config.LogicNotDeleteValue)
 			continue
 		}

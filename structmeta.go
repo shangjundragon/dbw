@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
-	"sync"
 )
 
 // 修改structMeta定义，添加更多字段信息
@@ -18,28 +17,29 @@ type fieldInfo struct {
 
 // 结构体元数据结构
 type structMeta struct {
-	tableName        string               // 表名
-	idGenerator      string               // 字段生成器名称
-	fieldsInfoMap    map[string]fieldInfo // 字段信息
-	fieldMap         map[string]int       // 数据库列名（小写）到字段索引的映射
-	fieldDbColumnMap map[string]string    // 字段名（小写）到数据库列名的映射
-	dbColumnFieldMap map[string]string    // 数据库列名（小写）到字段名的映射
-	dbColumnSlice    []string             // 数据库列名（小写）切片
+	tableName     string               // 表名
+	idGenerator   string               // 主键生成器名称
+	fieldsInfoMap map[string]fieldInfo // 字段信息
+
+	fieldMap         map[string]int    // 数据库列名到结构体字段索引的映射
+	fieldDbColumnMap map[string]string // 结构体字段名到数据库列名的映射
+	dbColumnFieldMap map[string]string // 数据库列名到结构体字段名的映射
+
+	dbColumnSlice []string // 数据库列名（小写）切片
 
 	tableIdProp     string // 表id属性名
 	tableIdDbColumn string // 表id数据库列名
 
-	isLogicDelete    bool   // 是否逻辑删除
-	logicDelProp     string // 逻辑删除属性名
-	logicDelDbColumn string // 逻辑删除属性数据库列名
+	logicDelFiledName string // 逻辑删除属性名
+	logicDelDbColumn  string // 逻辑删除属性数据库列名
 
-	autoCreateTimeProp     string // 自动创建时间属性名
-	autoCreateTimeDbColumn string // 自动创建时间属性数据库列名
-	autoCreateTimeTagValue string // 自动创建时间tag值
+	autoCreateTimeFiledName string // 自动创建时间属性名
+	autoCreateTimeDbColumn  string // 自动创建时间属性数据库列名
+	autoCreateTimeTagValue  string // 自动创建时间tag值
 
-	autoUpdateTimeProp     string // 自动更新时间属性名
-	autoUpdateTimeDbColumn string // 自动更新时间属性数据库列名
-	autoUpdateTimeTagValue string // 自动更新时间tag值
+	autoUpdateTimeFiledName string // 自动更新时间属性名
+	autoUpdateTimeDbColumn  string // 自动更新时间属性数据库列名
+	autoUpdateTimeTagValue  string // 自动更新时间tag值
 
 }
 
@@ -98,6 +98,10 @@ func getStructMeta[T any]() *structMeta {
 		field := typeOf.Field(i)
 
 		dbwTag := resolveDbwTag(field.Tag.Get("dbw"))
+		if dbwTag["ignore"] == "true" {
+
+			continue
+		}
 		colName := dbwTag["column"]
 
 		if colName == "" {
@@ -111,19 +115,18 @@ func getStructMeta[T any]() *structMeta {
 		}
 		// 逻辑删除
 		if dbwTag["tableLogic"] == "true" {
-			meta.logicDelProp = field.Name
-			meta.isLogicDelete = true
+			meta.logicDelFiledName = field.Name
 			meta.logicDelDbColumn = colName
 		}
 		// 自动创建时间
 		if dbwTag["autoCreateTime"] != "" {
-			meta.autoCreateTimeProp = field.Name
+			meta.autoCreateTimeFiledName = field.Name
 			meta.autoCreateTimeDbColumn = colName
 			meta.autoCreateTimeTagValue = dbwTag["autoCreateTime"]
 		}
 		// 自动更新时间
 		if dbwTag["autoUpdateTime"] != "" {
-			meta.autoUpdateTimeProp = field.Name
+			meta.autoUpdateTimeFiledName = field.Name
 			meta.autoUpdateTimeDbColumn = colName
 			meta.autoUpdateTimeTagValue = dbwTag["autoUpdateTime"]
 		}
@@ -184,24 +187,4 @@ func setIdMeta(meta *structMeta, field reflect.StructField) {
 	}
 	meta.tableIdProp = field.Name
 	meta.tableIdDbColumn = camelToSnake(field.Name)
-}
-
-// 清理缓存的函数（可选）
-func clearStructMetaCache() {
-	structMetaCache = sync.Map{}
-}
-
-// 获取缓存统计信息（可选）
-func getStructMetaCacheStats() (int, []string) {
-	count := 0
-	var types []string
-
-	structMetaCache.Range(func(key, value interface{}) bool {
-		count++
-		tType := key.(reflect.Type)
-		types = append(types, tType.String())
-		return true
-	})
-
-	return count, types
 }

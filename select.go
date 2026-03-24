@@ -7,8 +7,8 @@ import (
 	"strings"
 )
 
-// BuildSelect 构建查询SQL
-func (q *DbWrapper[T]) BuildSelect() (string, []any) {
+// BuildFullSelectSql 构建完整查询SQL select * from user where age > 18 order by age limit 10
+func (q *DbWrapper[T]) BuildFullSelectSql() (string, []any) {
 	sqlBuilder := strings.Builder{}
 
 	// SELECT
@@ -22,7 +22,7 @@ func (q *DbWrapper[T]) BuildSelect() (string, []any) {
 	sqlBuilder.WriteString(" FROM " + q.getTableName())
 
 	// 逻辑删除查询条件
-	q.AndIf(q.meta.isLogicDelete, func(w *DbWrapper[T]) {
+	q.AndIf(q.meta.logicDelDbColumn != "", func(w *DbWrapper[T]) {
 		w.Eq(q.meta.logicDelDbColumn, q.config.LogicNotDeleteValue)
 	})
 	// WHERE
@@ -89,7 +89,7 @@ func (q *DbWrapper[T]) BuildSelect() (string, []any) {
 // query 执行查询
 func (q *DbWrapper[T]) query() (*sql.Rows, error) {
 
-	sqlStr, args := q.BuildSelect()
+	sqlStr, args := q.BuildFullSelectSql()
 	if q.config.Debug {
 		q.PrintDebugSql(sqlStr, args)
 	}
@@ -106,7 +106,7 @@ func (q *DbWrapper[T]) query() (*sql.Rows, error) {
 
 // queryRow 单行查询
 func (q *DbWrapper[T]) queryRow() *sql.Row {
-	sqlStr, args := q.BuildSelect()
+	sqlStr, args := q.BuildFullSelectSql()
 	if q.config.Debug {
 		q.PrintDebugSql(sqlStr, args)
 	}
