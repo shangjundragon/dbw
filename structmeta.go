@@ -8,22 +8,23 @@ import (
 
 // 修改structMeta定义，添加更多字段信息
 type fieldInfo struct {
-	name    string // 字段名
-	colName string // 数据库列名
-	index   int    // 字段索引
-	tag     reflect.StructTag
-	dbwTag  map[string]string
+	dbIgnore bool   // 数据库不存在该字段?
+	name     string // 字段名
+	dbColumn string // 数据库列名
+	index    int    // 字段索引
+	tag      reflect.StructTag
+	dbwTag   map[string]string
 }
 
 // 结构体元数据结构
 type structMeta struct {
 	tableName     string               // 表名
 	idGenerator   string               // 主键生成器名称
-	fieldsInfoMap map[string]fieldInfo // 字段信息
+	fieldsInfoMap map[string]fieldInfo // 结构体字段名字段信息映射
 
-	fieldMap         map[string]int    // 数据库列名到结构体字段索引的映射
-	fieldDbColumnMap map[string]string // 结构体字段名到数据库列名的映射
-	dbColumnFieldMap map[string]string // 数据库列名到结构体字段名的映射
+	fieldMap             map[string]int    // 数据库列名到结构体字段索引的映射
+	dbColumnFiledMap     map[string]string // 结构体字段名到数据库列名的映射
+	dbColumnFieldNameMap map[string]string // 数据库列名到结构体字段名的映射
 
 	dbColumnSlice []string // 数据库列名（小写）切片
 
@@ -43,34 +44,6 @@ type structMeta struct {
 
 }
 
-func resolveDbwTag(dbwTag string) map[string]string {
-	result := make(map[string]string)
-	if dbwTag == "" {
-		return result
-	}
-
-	// 按分号分割标签
-	parts := strings.Split(dbwTag, ";")
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-
-		// 按冒号分割键值对
-		kv := strings.SplitN(part, ":", 2)
-		if len(kv) == 1 {
-			// 只有键没有值的情况，如 "primaryKey"
-			result[kv[0]] = "true"
-		} else {
-			// 键值对，如 "type:varchar(100)"
-			result[kv[0]] = strings.TrimSpace(kv[1])
-		}
-	}
-
-	return result
-}
-
 // getStructMeta 获取结构体元数据（带缓存）
 func getStructMeta[T any]() *structMeta {
 	var t T
@@ -81,11 +54,11 @@ func getStructMeta[T any]() *structMeta {
 	}
 
 	meta := &structMeta{
-		fieldsInfoMap:    make(map[string]fieldInfo),
-		fieldMap:         make(map[string]int),
-		fieldDbColumnMap: make(map[string]string),
-		dbColumnFieldMap: make(map[string]string),
-		dbColumnSlice:    make([]string, 0),
+		fieldsInfoMap:        make(map[string]fieldInfo),
+		fieldMap:             make(map[string]int),
+		dbColumnFiledMap:     make(map[string]string),
+		dbColumnFieldNameMap: make(map[string]string),
+		dbColumnSlice:        make([]string, 0),
 	}
 	// 获取表名
 	if tabler, ok := any(t).(Tabler); ok {
@@ -98,7 +71,7 @@ func getStructMeta[T any]() *structMeta {
 		field := typeOf.Field(i)
 
 		dbwTag := resolveDbwTag(field.Tag.Get("dbw"))
-		if dbwTag["ignore"] == "true" {
+		if dbwTag["dbIgnore"] == "true" {
 
 			continue
 		}
@@ -132,15 +105,16 @@ func getStructMeta[T any]() *structMeta {
 		}
 
 		fieldInfo := fieldInfo{
-			name:    field.Name,
-			colName: colName,
-			index:   i,
-			tag:     field.Tag,
-			dbwTag:  dbwTag,
+			dbIgnore: dbwTag["dbIgnore"] == "true",
+			name:     field.Name,
+			dbColumn: colName,
+			index:    i,
+			tag:      field.Tag,
+			dbwTag:   dbwTag,
 		}
 		meta.fieldsInfoMap[field.Name] = fieldInfo
-		meta.fieldDbColumnMap[field.Name] = colName
-		meta.dbColumnFieldMap[colName] = field.Name
+		meta.dbColumnFiledMap[field.Name] = colName
+		meta.dbColumnFieldNameMap[colName] = field.Name
 		meta.dbColumnSlice = append(meta.dbColumnSlice, colName)
 		meta.fieldMap[colName] = i
 	}
@@ -187,4 +161,32 @@ func setIdMeta(meta *structMeta, field reflect.StructField) {
 	}
 	meta.tableIdFiledName = field.Name
 	meta.tableIdDbColumn = camelToSnake(field.Name)
+}
+
+func resolveDbwTag(dbwTag string) map[string]string {
+	result := make(map[string]string)
+	if dbwTag == "" {
+		return result
+	}
+
+	// 按分号分割标签
+	parts := strings.Split(dbwTag, ";")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		// 按冒号分割键值对
+		kv := strings.SplitN(part, ":", 2)
+		if len(kv) == 1 {
+			// 只有键没有值的情况，如 "primaryKey"
+			result[kv[0]] = "true"
+		} else {
+			// 键值对，如 "type:varchar(100)"
+			result[kv[0]] = strings.TrimSpace(kv[1])
+		}
+	}
+
+	return result
 }

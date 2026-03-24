@@ -16,7 +16,7 @@ func (q *DbWrapper[T]) beforeInsert(data *T) (generateTableId any, err error) {
 		fieldValue := valueOf.Field(fieldInfo.index)
 
 		// 主键处理
-		if fieldInfo.colName == q.meta.tableIdDbColumn {
+		if fieldInfo.dbColumn == q.meta.tableIdDbColumn {
 			if fieldValue.IsZero() {
 				generateTableId = idGenerator[q.meta.idGenerator]()
 				err = editStructProp(data, fieldInfo.name, generateTableId)
@@ -37,7 +37,7 @@ func (q *DbWrapper[T]) beforeInsert(data *T) (generateTableId any, err error) {
 		}
 
 		// 逻辑删除值处理
-		if q.meta.logicDelDbColumn != "" && fieldInfo.colName == q.meta.logicDelDbColumn {
+		if q.meta.logicDelDbColumn != "" && fieldInfo.dbColumn == q.meta.logicDelDbColumn {
 			err = editStructProp(data, fieldInfo.name, q.config.LogicNotDeleteValue)
 			continue
 		}
@@ -73,12 +73,16 @@ func (q *DbWrapper[T]) Insert(data *T) (result sql.Result, err error) {
 
 	// 构建列名、占位符和参数
 	for _, fieldInfo := range q.meta.fieldsInfoMap {
+		// 忽略字段
+		if fieldInfo.dbIgnore {
+			continue
+		}
 		fieldValue := dataValue.Field(fieldInfo.index)
-		// 跳过零值
+		// 跳过零值和忽略字段
 		if fieldValue.IsZero() {
 			continue
 		}
-		columns = append(columns, fieldInfo.colName)
+		columns = append(columns, fieldInfo.dbColumn)
 		placeholders = append(placeholders, "?")
 		args = append(args, fieldValue.Interface())
 	}
@@ -158,18 +162,26 @@ func (q *DbWrapper[T]) InsertBatch(data []T) (result sql.Result, err error) {
 	}
 
 	// 预分配切片容量
-	columns := make([]string, 0, len(q.meta.dbColumnSlice))
+	dbColumns := make([]string, 0, len(q.meta.dbColumnSlice))
 	placeholders := make([]string, 0, len(data))
 	args := make([]any, 0, len(data)*len(q.meta.dbColumnSlice))
 
 	// 构建列名和参数
 	for i := range data {
 		rowPlaceholders := make([]string, 0, len(q.meta.dbColumnSlice))
-		for _, colName := range q.meta.dbColumnSlice {
+		for _, dbColumn := range q.meta.dbColumnSlice {
+			fieldName := q.meta.dbColumnFieldNameMap[dbColumn]
+			fieldInfo := q.meta.fieldsInfoMap[fieldName]
 			if i == 0 {
-				columns = append(columns, colName)
+				if fieldInfo.dbIgnore {
+					continue
+				}
+				// 添加列名
+				dbColumns = append(dbColumns, dbColumn)
 			}
-			fieldName := q.meta.dbColumnFieldMap[colName]
+			if fieldInfo.dbIgnore {
+				continue
+			}
 			fieldValue := reflect.ValueOf(&data[i]).Elem().FieldByName(fieldName)
 			args = append(args, fieldValue.Interface())
 			rowPlaceholders = append(rowPlaceholders, "?")
@@ -181,7 +193,7 @@ func (q *DbWrapper[T]) InsertBatch(data []T) (result sql.Result, err error) {
 	sqlStr := fmt.Sprintf(
 		"INSERT INTO %s (%s) VALUES (%s)",
 		q.getTableName(),
-		strings.Join(columns, ", "),
+		strings.Join(dbColumns, ", "),
 		strings.Join(placeholders, "), ("),
 	)
 

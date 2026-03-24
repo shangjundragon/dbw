@@ -26,15 +26,15 @@ func (q *DbWrapper[T]) UpdateById(data *T) (result sql.Result, err error) {
 	}
 	for _, fieldInfo := range q.meta.fieldsInfoMap {
 		// 跳过ID和逻辑删除字段
-		if fieldInfo.name == q.meta.tableIdFiledName || fieldInfo.name == q.meta.logicDelFiledName {
+		if fieldInfo.dbIgnore || fieldInfo.name == q.meta.tableIdFiledName || fieldInfo.name == q.meta.logicDelFiledName {
 			continue
 		}
 		// 自动更新时间
 		if fieldInfo.dbwTag["autoUpdateTime"] != "" {
 			if fieldInfo.dbwTag["autoUpdateTime"] == "milli" {
-				appendSet(fieldInfo.colName, time.Now().UnixMilli())
+				appendSet(fieldInfo.dbColumn, time.Now().UnixMilli())
 			} else {
-				appendSet(fieldInfo.colName, time.Now())
+				appendSet(fieldInfo.dbColumn, time.Now())
 			}
 			continue
 		}
@@ -42,7 +42,7 @@ func (q *DbWrapper[T]) UpdateById(data *T) (result sql.Result, err error) {
 		fieldValue := elem.Field(fieldInfo.index)
 		// 处理非零值的情况
 		if !fieldValue.IsZero() {
-			appendSet(fieldInfo.colName, fieldValue.Interface())
+			appendSet(fieldInfo.dbColumn, fieldValue.Interface())
 			continue
 		}
 
@@ -52,7 +52,7 @@ func (q *DbWrapper[T]) UpdateById(data *T) (result sql.Result, err error) {
 		if fieldValue.Kind() == reflect.Ptr {
 			// 更新策略为总是参与更新
 			if fieldInfo.dbwTag["tableUpdateStrategy"] == "always" {
-				appendSet(fieldInfo.colName, nil)
+				appendSet(fieldInfo.dbColumn, nil)
 			}
 		} else {
 			// 值类型
@@ -61,9 +61,9 @@ func (q *DbWrapper[T]) UpdateById(data *T) (result sql.Result, err error) {
 				defaultZeroValue, has := fieldInfo.dbwTag["default"]
 				if has {
 					// 有默认值
-					appendSet(fieldInfo.colName, defaultZeroValue)
+					appendSet(fieldInfo.dbColumn, defaultZeroValue)
 				} else {
-					appendSet(fieldInfo.colName, fieldValue.Interface())
+					appendSet(fieldInfo.dbColumn, fieldValue.Interface())
 				}
 			}
 		}
