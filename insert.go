@@ -150,11 +150,12 @@ func (q *DbWrapper[T]) InsertBatch(data []T) (result sql.Result, err error) {
 	tableIdFieldInfo := q.meta.fieldsInfoMap[q.meta.tableIdFiledName]
 	idType := tableIdFieldInfo.dbwTag["idType"]
 	if idType != "" && idType != "assign" {
+		// 在插入多条记录时，主键类型必须设置为“assign”。
 		return nil, fmt.Errorf("primary key type must be 'assign' when inserting multiple records")
 	}
 
 	// 生成主键并检查重复（仅当使用自动 ID 生成器时）
-	generateTableIdMap := make(map[any]struct{}, len(data))
+	generateTableIdMap := make(map[any]any, len(data))
 	for i := range data {
 		generateTableId, err := q.beforeInsert(&data[i])
 		if err != nil {
@@ -163,9 +164,10 @@ func (q *DbWrapper[T]) InsertBatch(data []T) (result sql.Result, err error) {
 		// 只有生成了新的 ID 才检查重复
 		if generateTableId != nil {
 			if _, exists := generateTableIdMap[generateTableId]; exists {
+				// 在插入多条记录时，主键必须保持唯一性。
 				return nil, fmt.Errorf("primary key must be unique when inserting multiple records")
 			}
-			generateTableIdMap[generateTableId] = struct{}{}
+			generateTableIdMap[generateTableId] = true
 		}
 	}
 
