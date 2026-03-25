@@ -63,7 +63,7 @@ func (q *DbWrapper[T]) Insert(data *T) (result sql.Result, err error) {
 		return nil, fmt.Errorf("entity cannot be nil")
 	}
 
-	_, err = q.beforeInsert(data)
+	generatedId, err := q.beforeInsert(data)
 	if err != nil {
 		return nil, fmt.Errorf("before insert failed: %w", err)
 	}
@@ -93,7 +93,7 @@ func (q *DbWrapper[T]) Insert(data *T) (result sql.Result, err error) {
 	}
 
 	if len(columns) == 0 {
-		return nil, fmt.Errorf("no fields to insert")
+		return nil, fmt.Errorf("no fields to insert for table %s", q.getTableName())
 	}
 
 	// 构建 INSERT 语句
@@ -122,16 +122,21 @@ func (q *DbWrapper[T]) Insert(data *T) (result sql.Result, err error) {
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("insert failed: %w", err)
+		return nil, fmt.Errorf("insert failed for table %s: %w", q.getTableName(), err)
 	}
 
 	// 检查受影响行数
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return nil, fmt.Errorf("insert failed: %w", err)
+		return nil, fmt.Errorf("insert succeeded but failed to get affected rows: %w", err)
 	}
 	if affected == 0 {
-		return nil, fmt.Errorf("insert failed: no rows affected")
+		return nil, fmt.Errorf("insert failed: no rows affected for table %s", q.getTableName())
+	}
+
+	// 如果有生成的 ID，记录调试信息
+	if q.config.Debug && generatedId != nil {
+		fmt.Printf("[DEBUG] Generated ID: %v\n", generatedId)
 	}
 
 	return result, nil
@@ -141,6 +146,14 @@ func (q *DbWrapper[T]) Insert(data *T) (result sql.Result, err error) {
 func (q *DbWrapper[T]) InsertBatch(data []T) (result sql.Result, err error) {
 	if data == nil {
 		return nil, fmt.Errorf("entity cannot be nil")
+	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("data slice is empty")
+	}
+	// 限制单次批量插入的最大数量，避免 SQL 语句过长
+	const maxBatchSize = 1000
+	if len(data) > maxBatchSize {
+		return nil, fmt.Errorf("batch size %d exceeds maximum limit %d, use InsertBatchSplit instead", len(data), maxBatchSize)
 	}
 	if q.meta.tableIdDbColumn == "" {
 		return nil, fmt.Errorf("table id column not found")
@@ -155,7 +168,7 @@ func (q *DbWrapper[T]) InsertBatch(data []T) (result sql.Result, err error) {
 	}
 
 	// 生成主键并检查重复（仅当使用自动 ID 生成器时）
-	generateTableIdMap := make(map[any]any, len(data))
+	generateTableIdMap := make(map[any]struct{}, len(data))
 	for i := range data {
 		generateTableId, err := q.beforeInsert(&data[i])
 		if err != nil {
@@ -167,7 +180,7 @@ func (q *DbWrapper[T]) InsertBatch(data []T) (result sql.Result, err error) {
 				// 在插入多条记录时，主键必须保持唯一性。
 				return nil, fmt.Errorf("primary key must be unique when inserting multiple records")
 			}
-			generateTableIdMap[generateTableId] = true
+			generateTableIdMap[generateTableId] = struct{}{}
 		}
 	}
 
@@ -225,7 +238,7 @@ func (q *DbWrapper[T]) InsertBatch(data []T) (result sql.Result, err error) {
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("insert batch failed: %w", err)
+		return nil, fmt.Errorf("insert batch failed for table %s: %w", q.getTableName(), err)
 	}
 
 	return result, nil

@@ -11,7 +11,7 @@ import (
 func (q *DbWrapper[T]) UpdateById(data *T) (result sql.Result, err error) {
 
 	if q.meta.tableIdFiledName == "" {
-		return nil, fmt.Errorf("table id property not found")
+		return nil, fmt.Errorf("table id property not found for type %T", *new(T))
 	}
 	sqlStr := strings.Builder{}
 	args := make([]any, 0)
@@ -70,7 +70,7 @@ func (q *DbWrapper[T]) UpdateById(data *T) (result sql.Result, err error) {
 	}
 
 	if setCount == 0 {
-		return nil, fmt.Errorf("no fields for set")
+		return nil, fmt.Errorf("no fields for set update for table %s", q.getTableName())
 	}
 
 	sqlStr.WriteString(strings.Join(sets, ", "))

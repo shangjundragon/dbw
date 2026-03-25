@@ -64,18 +64,23 @@ func NewConfig(fn func(config *Config)) *Config {
 }
 
 var (
+	snowFlakeMu     sync.RWMutex // 保护 snowFlake 的读写锁
 	snowFlake       *Snowflake
-	structMetaCache sync.Map // map[reflect.Type]*structMeta
+	structMetaCache sync.Map     // map[reflect.Type]*structMeta
+	idGeneratorMu   sync.RWMutex // 保护 idGenerator 的读写锁
 	idGenerator     = map[string]func() any{
 		"snowflake":    func() any { return GetSnowflake().GetId() },
 		"snowflakeStr": func() any { return fmt.Sprintf("%d", GetSnowflake().GetId()) },
 	}
 	// defaultConfig 默认配置（用于向后兼容）
-	defaultConfig *Config
+	defaultConfigMu sync.RWMutex // 保护 defaultConfig 的读写锁
+	defaultConfig   *Config
 )
 
 // RegisterIdGenerator 注册 ID 生成器
 func RegisterIdGenerator(key string, fn func() any) {
+	idGeneratorMu.Lock()
+	defer idGeneratorMu.Unlock()
 	idGenerator[key] = fn
 }
 

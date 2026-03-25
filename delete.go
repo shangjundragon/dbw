@@ -45,22 +45,22 @@ func (q *DbWrapper[T]) Delete() (result sql.Result, err error) {
 	return result, nil
 }
 
-// DeleteById 根据id删除
+// DeleteById 根据 id 删除
 func (q *DbWrapper[T]) DeleteById(id any) (result sql.Result, err error) {
 	if q.meta.tableIdFiledName == "" {
-		return nil, fmt.Errorf("table id property not found")
+		return nil, fmt.Errorf("table id property not found for type %T", *new(T))
 	}
 	q.Eq(q.meta.tableIdDbColumn, id)
 	return q.Delete()
 }
 
-// DeleteByIds 批量根据id删除
+// DeleteByIds 批量根据 id 删除
 func (q *DbWrapper[T]) DeleteByIds(ids []any) (result sql.Result, err error) {
 	if len(ids) == 0 {
-		return nil, nil
+		return nil, fmt.Errorf("ids slice is empty")
 	}
 	if q.meta.tableIdFiledName == "" {
-		return nil, fmt.Errorf("table id property not found")
+		return nil, fmt.Errorf("table id property not found for type %T", *new(T))
 	}
 	q.In(q.meta.tableIdDbColumn, ids)
 	return q.Delete()

@@ -20,6 +20,16 @@ func CreateSnowflakeFactory() Snowflake {
 	}
 }
 func GetSnowflake() *Snowflake {
+	snowFlakeMu.RLock()
+	if snowFlake != nil {
+		defer snowFlakeMu.RUnlock()
+		return snowFlake
+	}
+	snowFlakeMu.RUnlock()
+	
+	snowFlakeMu.Lock()
+	defer snowFlakeMu.Unlock()
+	// 双重检查锁定
 	if snowFlake == nil {
 		s := CreateSnowflakeFactory()
 		snowFlake = &s

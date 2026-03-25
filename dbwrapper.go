@@ -203,6 +203,28 @@ func (q *DbWrapper[T]) WithContext(ctx context.Context) *DbWrapper[T] {
 
 func (q *DbWrapper[T]) Clone() *DbWrapper[T] {
 	qCopy := *q
+	// 深拷贝切片，避免共享底层数组
+	if qCopy.selects != nil {
+		qCopy.selects = append([]string(nil), qCopy.selects...)
+	}
+	if qCopy.wheres != nil {
+		qCopy.wheres = append([]whereExpr(nil), qCopy.wheres...)
+	}
+	if qCopy.orders != nil {
+		qCopy.orders = append([]orderExpr(nil), qCopy.orders...)
+	}
+	if qCopy.groupBy != nil {
+		qCopy.groupBy = append([]string(nil), qCopy.groupBy...)
+	}
+	if qCopy.havings != nil {
+		qCopy.havings = append([]whereExpr(nil), qCopy.havings...)
+	}
+	if qCopy.whereIsOrIndexes != nil {
+		qCopy.whereIsOrIndexes = make(map[int]any, len(qCopy.whereIsOrIndexes))
+		for k, v := range q.whereIsOrIndexes {
+			qCopy.whereIsOrIndexes[k] = v
+		}
+	}
 	return &qCopy
 }
 

@@ -88,7 +88,6 @@ func (q *DbWrapper[T]) BuildFullSelectSql() (string, []any) {
 
 // query 执行查询
 func (q *DbWrapper[T]) query() (*sql.Rows, error) {
-
 	sqlStr, args := q.BuildFullSelectSql()
 	if q.config.Debug {
 		q.PrintDebugSql(sqlStr, args)
@@ -96,7 +95,7 @@ func (q *DbWrapper[T]) query() (*sql.Rows, error) {
 
 	if q.tx == nil {
 		if q.config.Db == nil {
-			return nil, fmt.Errorf("database connection is nil")
+			return nil, fmt.Errorf("database connection is nil for table %s", q.getTableName())
 		}
 		return q.config.Db.QueryContext(q.ctx, sqlStr, args...)
 	} else {
@@ -265,7 +264,8 @@ func (q *DbWrapper[T]) scanRowsToTypeSlice(rows *sql.Rows) ([]T, error) {
 		return nil, fmt.Errorf("failed to get columns: %w", err)
 	}
 
-	var results = make([]T, 0)
+	// 预分配结果切片，初始容量为列数的 2 倍（启发式）
+	results := make([]T, 0, len(columns)*2)
 	var t T
 	tType := reflect.TypeOf(t)
 
@@ -281,7 +281,7 @@ func (q *DbWrapper[T]) scanRowsToTypeSlice(rows *sql.Rows) ([]T, error) {
 	}
 
 	for rows.Next() {
-		// 创建T的新实例
+		// 创建 T 的新实例
 		result := reflect.New(tType).Elem()
 
 		// 准备扫描值
@@ -292,7 +292,7 @@ func (q *DbWrapper[T]) scanRowsToTypeSlice(rows *sql.Rows) ([]T, error) {
 				// 获取字段地址作为扫描目标
 				scanValues[i] = result.Field(idx).Addr().Interface()
 			} else {
-				// 如果没有匹配的字段，使用通用interface{}
+				// 如果没有匹配的字段，使用通用 interface{}
 				var val any
 				scanValues[i] = &val
 			}
