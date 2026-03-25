@@ -230,6 +230,11 @@ func GetFloat64Ptr(f float64) *float64 {
 	return &f
 }
 
+// GetContextWithTimeout 创建带超时的上下文（用于测试）
+func GetContextWithTimeout(timeout time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), timeout)
+}
+
 func sliceSplit[T any](sli []T, size int) ([][]T, error) {
 	// 参数校验
 	if size <= 0 {
