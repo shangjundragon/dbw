@@ -72,9 +72,6 @@ var (
 		"snowflake":    func() any { return GetSnowflake().GetId() },
 		"snowflakeStr": func() any { return fmt.Sprintf("%d", GetSnowflake().GetId()) },
 	}
-	// defaultConfig 默认配置（用于向后兼容）
-	defaultConfigMu sync.RWMutex // 保护 defaultConfig 的读写锁
-	defaultConfig   *Config
 )
 
 // RegisterIdGenerator 注册 ID 生成器
@@ -82,19 +79,6 @@ func RegisterIdGenerator(key string, fn func() any) {
 	idGeneratorMu.Lock()
 	defer idGeneratorMu.Unlock()
 	idGenerator[key] = fn
-}
-
-// InitConfig 初始化默认配置（向后兼容）
-func InitConfig(fn func(config *Config)) {
-	defaultConfig = NewConfig(fn)
-}
-
-// GetDefaultConfig 获取默认配置
-func GetDefaultConfig() *Config {
-	if defaultConfig == nil {
-		panic("default config not initialized, please call InitConfig first")
-	}
-	return defaultConfig
 }
 
 // getTime 根据时间标签获取时间
@@ -270,15 +254,51 @@ func convertDefaultValue(defaultValue string, targetType reflect.Type) any {
 	}
 
 	switch targetType.Kind() {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+	case reflect.Int:
 		if num, err := strconv.Atoi(defaultValue); err == nil {
 			return num
 		}
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+	case reflect.Int8:
+		if num, err := strconv.ParseInt(defaultValue, 10, 8); err == nil {
+			return int8(num)
+		}
+	case reflect.Int16:
+		if num, err := strconv.ParseInt(defaultValue, 10, 16); err == nil {
+			return int16(num)
+		}
+	case reflect.Int32:
+		if num, err := strconv.ParseInt(defaultValue, 10, 32); err == nil {
+			return int32(num)
+		}
+	case reflect.Int64:
+		if num, err := strconv.ParseInt(defaultValue, 10, 64); err == nil {
+			return num
+		}
+	case reflect.Uint:
+		if num, err := strconv.ParseUint(defaultValue, 10, strconv.IntSize); err == nil {
+			return uint(num)
+		}
+	case reflect.Uint8:
+		if num, err := strconv.ParseUint(defaultValue, 10, 8); err == nil {
+			return uint8(num)
+		}
+	case reflect.Uint16:
+		if num, err := strconv.ParseUint(defaultValue, 10, 16); err == nil {
+			return uint16(num)
+		}
+	case reflect.Uint32:
+		if num, err := strconv.ParseUint(defaultValue, 10, 32); err == nil {
+			return uint32(num)
+		}
+	case reflect.Uint64:
 		if num, err := strconv.ParseUint(defaultValue, 10, 64); err == nil {
 			return num
 		}
-	case reflect.Float32, reflect.Float64:
+	case reflect.Float32:
+		if num, err := strconv.ParseFloat(defaultValue, 32); err == nil {
+			return float32(num)
+		}
+	case reflect.Float64:
 		if num, err := strconv.ParseFloat(defaultValue, 64); err == nil {
 			return num
 		}

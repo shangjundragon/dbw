@@ -70,7 +70,7 @@ func (q *DbWrapper[T]) Reset(opts ...Options) *DbWrapper[T] {
 		opt((*DbWrapper[any])(n))
 	}
 	if n.config == nil {
-		n.config = GetDefaultConfig()
+		panic("config is required, please use dbw.WithConfig(config) to pass configuration")
 	}
 	if n.config.Db == nil {
 		panic("database not properly configured")
@@ -96,7 +96,7 @@ func New[T any](opts ...Options) *DbWrapper[T] {
 	}
 
 	if q.config == nil {
-		q.config = GetDefaultConfig()
+		panic("config is required, please use dbw.WithConfig(config) to pass configuration")
 	}
 	if q.config.Db == nil {
 		panic("database not properly configured")
