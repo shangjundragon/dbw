@@ -16,11 +16,13 @@ func getStringPtr(s string) *string {
 	return &s
 }
 
-var testConfig *dbw.Config
+var (
+	testConfig *dbw.Config
+)
 
 func init() {
 	// 打开数据库连接（内存模式）
-	db, err := sql.Open("sqlite", ":memory:?cache=shared")
+	db, err := sql.Open("sqlite", "test.db")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -77,15 +79,15 @@ func init() {
 
 // User 测试结构体
 type User struct {
-	Id         int64     `dbw:"primaryKey"`
-	Username   string    `dbw:"default:u"`
-	Password   string    `dbw:"default:p"`
-	NickName   *string   `dbw:"column:nick_name"` // 指针类型支持 NULL
-	Age        int       `dbw:"default:0"`
-	Amount     float64   `dbw:"default:0.0"`
-	CreateTime int64     `dbw:"autoCreateTime:milli"`
-	UpdateTime int64     `dbw:"autoUpdateTime:milli"`
-	DelFlag    string    `dbw:"tableLogic"`
+	Id         int64   `dbw:"primaryKey"`
+	Username   string  `dbw:"default:u"`
+	Password   string  `dbw:"default:p"`
+	NickName   *string `dbw:"column:nick_name"` // 指针类型支持 NULL
+	Age        int     `dbw:"default:0"`
+	Amount     float64 `dbw:"default:0.0"`
+	CreateTime int64   `dbw:"autoCreateTime:milli"`
+	UpdateTime int64   `dbw:"autoUpdateTime:milli"`
+	DelFlag    string  `dbw:"tableLogic"`
 }
 
 func (User) TableName() string {
@@ -94,25 +96,25 @@ func (User) TableName() string {
 
 // Product 测试结构体（无逻辑删除）
 type Product struct {
-	Id         int64     `dbw:"primaryKey"`
+	Id         int64 `dbw:"primaryKey"`
 	Name       string
 	Price      *float64 `dbw:"column:price"` // 指针类型，用于测试更新策略
-	Stock      int       `dbw:"default:0"`
-	Status     int       `dbw:"default:1"`
-	CreateTime int64     `dbw:"autoCreateTime:milli"`
-	UpdateTime int64     `dbw:"autoUpdateTime:milli"`
+	Stock      int      `dbw:"default:0"`
+	Status     int      `dbw:"default:1"`
+	CreateTime int64    `dbw:"autoCreateTime:milli"`
+	UpdateTime int64    `dbw:"autoUpdateTime:milli"`
 }
 
 // OrderInfo 测试结构体（带逻辑删除）
 type OrderInfo struct {
-	Id         int64     `dbw:"primaryKey"`
-	OrderNo    string    `dbw:"column:order_no"`
-	UserId     int64     `dbw:"column:user_id"`
+	Id         int64  `dbw:"primaryKey"`
+	OrderNo    string `dbw:"column:order_no"`
+	UserId     int64  `dbw:"column:user_id"`
 	Amount     float64
 	Status     int
-	CreateTime int64     `dbw:"autoCreateTime:milli"`
-	UpdateTime int64     `dbw:"autoUpdateTime:milli"`
-	DelFlag    string    `dbw:"tableLogic"`
+	CreateTime int64  `dbw:"autoCreateTime:milli"`
+	UpdateTime int64  `dbw:"autoUpdateTime:milli"`
+	DelFlag    string `dbw:"tableLogic"`
 }
 
 func (OrderInfo) TableName() string {
@@ -522,7 +524,7 @@ func TestTransactionRollback(t *testing.T) {
 			Id       int64 `dbw:"primaryKey"`
 			Username string
 		}
-		
+
 		user1 := &UniqueUser{Username: "unique_user1"}
 		_, err := dbw.New[UniqueUser](dbw.WithConfig(testConfig), dbw.WithTx(tx)).Insert(user1)
 		if err != nil {
@@ -742,4 +744,16 @@ func BenchmarkInsertBatch(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+}
+
+func TestSelect(t *testing.T) {
+	userDbw := dbw.New[User](dbw.WithConfig(testConfig))
+	list, err := userDbw.Eq("username", "zhangsan").OrNest(func(d *dbw.DbWrapper[User]) {
+		d.Eq("age", 20)
+		d.Or().Eq("age", 21)
+	}).SelectList()
+	if err != nil {
+		t.Fatalf("查询失败：%v", err)
+	}
+	log.Printf("✓ 查询成功，共%d条", len(list))
 }

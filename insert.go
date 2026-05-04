@@ -7,83 +7,61 @@ import (
 	"strings"
 )
 
-// beforeInsert 插入前处理 返回 是否生成了主键、生成的主键值
 func (q *DbWrapper[T]) beforeInsert(data *T) (generateTableId any, err error) {
 	valueOf := reflect.ValueOf(data).Elem()
-
-	// 遍历结构体字段
 	for _, fieldInfo := range q.meta.fieldsInfoMap {
 		fieldValue := valueOf.Field(fieldInfo.index)
-
-		// 主键处理
 		if fieldInfo.dbColumn == q.meta.tableIdDbColumn {
 			if fieldValue.IsZero() {
-				generateTableId = idGenerator[q.meta.idGenerator]()
-				// 直接设置字段值
+				fn, ok := idGenerator[q.meta.idGenerator]
+				if !ok {
+					return nil, fmt.Errorf("dbw: id generator %s not found", q.meta.idGenerator)
+				}
+				generateTableId = fn()
 				fieldValue.Set(reflect.ValueOf(generateTableId))
 			}
 			continue
 		}
-
-		// 创建时间处理
 		if autoCreateTime := fieldInfo.dbwTag["autoCreateTime"]; autoCreateTime != "" {
-			val := getTime(autoCreateTime)
-			fieldValue.Set(reflect.ValueOf(val))
+			fieldValue.Set(reflect.ValueOf(getTime(autoCreateTime)))
 			continue
 		}
-
-		// 更新时间处理
 		if autoUpdateTime := fieldInfo.dbwTag["autoUpdateTime"]; autoUpdateTime != "" {
-			val := getTime(autoUpdateTime)
-			fieldValue.Set(reflect.ValueOf(val))
+			fieldValue.Set(reflect.ValueOf(getTime(autoUpdateTime)))
 			continue
 		}
-
-		// 逻辑删除值处理
 		if q.meta.logicDelDbColumn != "" && fieldInfo.dbColumn == q.meta.logicDelDbColumn {
 			fieldValue.Set(reflect.ValueOf(q.config.LogicNotDeleteValue))
 			continue
 		}
-
-		// 零值处理 - 设置默认值
 		if fieldValue.IsZero() {
 			if defaultValue, has := fieldInfo.dbwTag["default"]; has {
-				// 转换默认值为合适的类型
 				convertedVal := convertDefaultValue(defaultValue, fieldValue.Type())
 				fieldValue.Set(reflect.ValueOf(convertedVal))
 			}
 		}
 	}
-	return generateTableId, err
+	return generateTableId, nil
 }
 
-// Insert 插入数据 返回受影响行数
-func (q *DbWrapper[T]) Insert(data *T) (result sql.Result, err error) {
+// Insert inserts a single record and returns the result.
+func (q *DbWrapper[T]) Insert(data *T) (sql.Result, error) {
 	if data == nil {
-		return nil, fmt.Errorf("entity cannot be nil")
+		return nil, ErrNilEntity
 	}
-
 	generatedId, err := q.beforeInsert(data)
 	if err != nil {
-		return nil, fmt.Errorf("before insert failed: %w", err)
+		return nil, fmt.Errorf("before insert: %w", err)
 	}
-
-	// 预分配切片容量
 	columns := make([]string, 0, len(q.meta.fieldsInfoMap))
 	placeholders := make([]string, 0, len(q.meta.fieldsInfoMap))
 	args := make([]any, 0, len(q.meta.fieldsInfoMap))
-
-	// 反射数据值
 	dataValue := reflect.ValueOf(data).Elem()
-
-	// 构建列名、占位符和参数
 	for _, fieldInfo := range q.meta.fieldsInfoMap {
-		// 忽略字段
 		if fieldInfo.dbIgnore {
 			continue
 		}
 		fieldValue := dataValue.Field(fieldInfo.index)
-		// 跳过零值（主键和时间字段已在 beforeInsert 中处理）
 		if fieldValue.IsZero() {
 			continue
 		}
@@ -91,178 +69,115 @@ func (q *DbWrapper[T]) Insert(data *T) (result sql.Result, err error) {
 		placeholders = append(placeholders, "?")
 		args = append(args, fieldValue.Interface())
 	}
-
 	if len(columns) == 0 {
-		return nil, fmt.Errorf("no fields to insert for table %s", q.getTableName())
+		return nil, fmt.Errorf("%w: table %s", ErrNoFieldsToUpdate, q.getTableName())
 	}
-
-	// 构建 INSERT 语句
-	sqlStr := fmt.Sprintf(
-		"INSERT INTO %s (%s) VALUES (%s)",
-		q.getTableName(),
-		strings.Join(columns, ", "),
-		strings.Join(placeholders, ", "),
-	)
-
-	// 转换占位符
-	if q.config.PlaceholderConverter != nil {
-		sqlStr = q.config.PlaceholderConverter(sqlStr)
+	sqlStr := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", q.getTableName(), strings.Join(columns, ", "), strings.Join(placeholders, ", "))
+	if q.config.Dialect.DriverName() != "mysql" && q.config.Dialect.DriverName() != "sqlite" {
+		sqlStr = q.config.Dialect.ConvertPlaceholders(sqlStr)
 	}
-
-	// 打印调试信息
-	if q.config.Debug {
-		q.PrintDebugSql(sqlStr, args)
-	}
-
-	// 执行插入
+	debugLog(q.config, q.ctx, sqlStr, args)
+	var result sql.Result
 	if q.tx == nil {
 		result, err = q.config.Db.ExecContext(q.ctx, sqlStr, args...)
 	} else {
 		result, err = q.tx.ExecContext(q.ctx, sqlStr, args...)
 	}
-
 	if err != nil {
 		return nil, fmt.Errorf("insert failed for table %s: %w", q.getTableName(), err)
 	}
-
-	// 检查受影响行数
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return nil, fmt.Errorf("insert succeeded but failed to get affected rows: %w", err)
-	}
+	affected, _ := result.RowsAffected()
 	if affected == 0 {
 		return nil, fmt.Errorf("insert failed: no rows affected for table %s", q.getTableName())
 	}
-
-	// 如果有生成的 ID，记录调试信息
 	if q.config.Debug && generatedId != nil {
 		fmt.Printf("[DEBUG] Generated ID: %v\n", generatedId)
 	}
-
 	return result, nil
 }
 
-// InsertBatch 批量插入数据
-func (q *DbWrapper[T]) InsertBatch(data []T) (result sql.Result, err error) {
+// InsertBatch inserts multiple records in a single SQL statement (max 1000).
+func (q *DbWrapper[T]) InsertBatch(data []T) (sql.Result, error) {
 	if data == nil {
-		return nil, fmt.Errorf("entity cannot be nil")
+		return nil, ErrNilEntity
 	}
 	if len(data) == 0 {
-		return nil, fmt.Errorf("data slice is empty")
+		return nil, ErrEmptyData
 	}
-	// 限制单次批量插入的最大数量，避免 SQL 语句过长
 	const maxBatchSize = 1000
 	if len(data) > maxBatchSize {
-		return nil, fmt.Errorf("batch size %d exceeds maximum limit %d, use InsertBatchSplit instead", len(data), maxBatchSize)
+		return nil, ErrBatchTooLarge
 	}
 	if q.meta.tableIdDbColumn == "" {
-		return nil, fmt.Errorf("table id column not found")
+		return nil, ErrNoPrimaryKey
 	}
-
-	// 验证主键类型
-	tableIdFieldInfo := q.meta.fieldsInfoMap[q.meta.tableIdFiledName]
-	idType := tableIdFieldInfo.dbwTag["idType"]
-	if idType != "" && idType != "assign" {
-		// 在插入多条记录时，主键类型必须设置为“assign”。
-		return nil, fmt.Errorf("primary key type must be 'assign' when inserting multiple records")
-	}
-
-	// 生成主键并检查重复（仅当使用自动 ID 生成器时）
-	generateTableIdMap := make(map[any]struct{}, len(data))
 	for i := range data {
-		generateTableId, err := q.beforeInsert(&data[i])
+		fn, ok := idGenerator[q.meta.idGenerator]
+		if !ok {
+			return nil, fmt.Errorf("dbw: id generator %s not found", q.meta.idGenerator)
+		}
+		id := fn()
+		idFieldInfo := q.meta.fieldsInfoMap[q.meta.tableIdFieldName]
+		reflect.ValueOf(&data[i]).Elem().Field(idFieldInfo.index).Set(reflect.ValueOf(id))
+		_, err := q.beforeInsert(&data[i])
 		if err != nil {
-			return nil, fmt.Errorf("before insert failed: %w", err)
-		}
-		// 只有生成了新的 ID 才检查重复
-		if generateTableId != nil {
-			if _, exists := generateTableIdMap[generateTableId]; exists {
-				// 在插入多条记录时，主键必须保持唯一性。
-				return nil, fmt.Errorf("primary key must be unique when inserting multiple records")
-			}
-			generateTableIdMap[generateTableId] = struct{}{}
+			return nil, fmt.Errorf("before insert: %w", err)
 		}
 	}
-
-	// 预分配切片容量
 	dbColumns := make([]string, 0, len(q.meta.dbColumnSlice))
-	placeholders := make([]string, 0, len(data))
+	rowPlaceholders := make([]string, 0, len(data))
 	args := make([]any, 0, len(data)*len(q.meta.dbColumnSlice))
-
-	// 构建列名和参数
 	for i := range data {
-		rowPlaceholders := make([]string, 0, len(q.meta.dbColumnSlice))
+		rowPhs := make([]string, 0, len(q.meta.dbColumnSlice))
 		for _, dbColumn := range q.meta.dbColumnSlice {
 			fieldName := q.meta.dbColumnFieldNameMap[dbColumn]
-			fieldInfo := q.meta.fieldsInfoMap[fieldName]
+			fi := q.meta.fieldsInfoMap[fieldName]
 			if i == 0 {
-				if fieldInfo.dbIgnore {
+				if fi.dbIgnore {
 					continue
 				}
-				// 添加列名
 				dbColumns = append(dbColumns, dbColumn)
 			}
-			if fieldInfo.dbIgnore {
+			if fi.dbIgnore {
 				continue
 			}
-			fieldValue := reflect.ValueOf(&data[i]).Elem().FieldByName(fieldName)
+			fieldValue := reflect.ValueOf(&data[i]).Elem().Field(fi.index)
 			args = append(args, fieldValue.Interface())
-			rowPlaceholders = append(rowPlaceholders, "?")
+			rowPhs = append(rowPhs, "?")
 		}
-		placeholders = append(placeholders, strings.Join(rowPlaceholders, ", "))
+		rowPlaceholders = append(rowPlaceholders, "("+strings.Join(rowPhs, ", ")+")")
 	}
-
-	// 构建 INSERT 语句
-	sqlStr := fmt.Sprintf(
-		"INSERT INTO %s (%s) VALUES (%s)",
-		q.getTableName(),
-		strings.Join(dbColumns, ", "),
-		strings.Join(placeholders, "), ("),
-	)
-
-	// 转换占位符
-	if q.config.PlaceholderConverter != nil {
-		sqlStr = q.config.PlaceholderConverter(sqlStr)
+	sqlStr := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", q.getTableName(), strings.Join(dbColumns, ", "), strings.Join(rowPlaceholders, ", "))
+	if q.config.Dialect.DriverName() != "mysql" && q.config.Dialect.DriverName() != "sqlite" {
+		sqlStr = q.config.Dialect.ConvertPlaceholders(sqlStr)
 	}
-
-	// 打印调试信息
-	if q.config.Debug {
-		q.PrintDebugSql(sqlStr, args)
-	}
-
-	// 执行插入
+	debugLog(q.config, q.ctx, sqlStr, args)
+	var result sql.Result
+	var err error
 	if q.tx != nil {
 		result, err = q.tx.ExecContext(q.ctx, sqlStr, args...)
 	} else {
 		result, err = q.config.Db.ExecContext(q.ctx, sqlStr, args...)
 	}
-
 	if err != nil {
 		return nil, fmt.Errorf("insert batch failed for table %s: %w", q.getTableName(), err)
 	}
-
 	return result, nil
 }
 
-// InsertBatchSplit 分批批量插入数据
-func (q *DbWrapper[T]) InsertBatchSplit(data []T, size int) (results []sql.Result, err error) {
-	// 分割数据
+// InsertBatchSplit inserts records in batches of the given size.
+func (q *DbWrapper[T]) InsertBatchSplit(data []T, size int) ([]sql.Result, error) {
 	split, err := sliceSplit(data, size)
 	if err != nil {
-		return nil, fmt.Errorf("split data failed: %w", err)
+		return nil, fmt.Errorf("split data: %w", err)
 	}
-
-	// 预分配结果切片
-	results = make([]sql.Result, 0, len(split))
-
-	// 分批插入
+	results := make([]sql.Result, 0, len(split))
 	for _, batch := range split {
 		result, err := q.InsertBatch(batch)
 		if err != nil {
-			return results, fmt.Errorf("insert batch failed: %w", err)
+			return results, fmt.Errorf("insert batch: %w", err)
 		}
 		results = append(results, result)
 	}
-
 	return results, nil
 }

@@ -3,64 +3,44 @@ package dbw
 import (
 	"database/sql"
 	"fmt"
-	"strings"
 )
 
-// Delete 删除 返回受影响的行数和错误
-func (q *DbWrapper[T]) Delete() (result sql.Result, err error) {
+// Delete deletes records matching the WHERE conditions.
+func (q *DbWrapper[T]) Delete() (sql.Result, error) {
 	if len(q.wheres) == 0 {
-		return nil, fmt.Errorf("delete without WHERE is not allowed")
+		return nil, ErrNoWhereClause
 	}
-
-	// 逻辑删除
-	if q.meta.logicDelDbColumn != "" {
-		sets := map[string]any{q.meta.logicDelDbColumn: q.config.LogicDeleteValue}
-		result, err = q.Update(sets)
-		return result, err
-	}
-	sqlStr := strings.Builder{}
-
-	sqlStr.WriteString("DELETE FROM " + q.getTableName())
-	whereStr, args := q.BuildWhere()
-	sqlStr.WriteString(whereStr)
-
-	var converterSql string
-	if q.config.PlaceholderConverter != nil {
-		converterSql = q.config.PlaceholderConverter(sqlStr.String())
-	}
-	if q.config.Debug {
-		q.PrintDebugSql(converterSql, args)
-	}
-
+	sqlStr, args := q.buildDeleteSQL()
+	debugLog(q.config, q.ctx, sqlStr, args)
+	var result sql.Result
+	var err error
 	if q.tx == nil {
-		result, err = q.config.Db.ExecContext(q.ctx, converterSql, args...)
-
+		result, err = q.config.Db.ExecContext(q.ctx, sqlStr, args...)
 	} else {
-		result, err = q.tx.ExecContext(q.ctx, converterSql, args...)
+		result, err = q.tx.ExecContext(q.ctx, sqlStr, args...)
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("delete failed: %w", err)
 	}
-
 	return result, nil
 }
 
-// DeleteById 根据 id 删除
-func (q *DbWrapper[T]) DeleteById(id any) (result sql.Result, err error) {
-	if q.meta.tableIdFiledName == "" {
-		return nil, fmt.Errorf("table id property not found for type %T", *new(T))
+// DeleteById deletes a record by its primary key.
+func (q *DbWrapper[T]) DeleteById(id any) (sql.Result, error) {
+	if q.meta.tableIdFieldName == "" {
+		return nil, ErrNoPrimaryKey
 	}
 	q.Eq(q.meta.tableIdDbColumn, id)
 	return q.Delete()
 }
 
-// DeleteByIds 批量根据 id 删除
-func (q *DbWrapper[T]) DeleteByIds(ids []any) (result sql.Result, err error) {
+// DeleteByIds deletes records by their primary keys.
+func (q *DbWrapper[T]) DeleteByIds(ids []any) (sql.Result, error) {
 	if len(ids) == 0 {
-		return nil, fmt.Errorf("ids slice is empty")
+		return nil, ErrEmptyData
 	}
-	if q.meta.tableIdFiledName == "" {
-		return nil, fmt.Errorf("table id property not found for type %T", *new(T))
+	if q.meta.tableIdFieldName == "" {
+		return nil, ErrNoPrimaryKey
 	}
 	q.In(q.meta.tableIdDbColumn, ids)
 	return q.Delete()
