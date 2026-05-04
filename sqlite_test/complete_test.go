@@ -748,12 +748,9 @@ func BenchmarkInsertBatch(b *testing.B) {
 
 func TestSelect(t *testing.T) {
 	userDbw := dbw.New[User](dbw.WithConfig(testConfig))
-	list, err := userDbw.Eq("username", "zhangsan").OrNest(func(d *dbw.DbWrapper[User]) {
-		d.Eq("age", 20)
-		d.Or().Eq("age", 21)
-	}).SelectList()
+	one, err := userDbw.Eq("username", "zhangsan").FindOne()
 	if err != nil {
 		t.Fatalf("查询失败：%v", err)
 	}
-	log.Printf("✓ 查询成功，共%d条", len(list))
+	log.Printf("查询结果：%v", one)
 }
