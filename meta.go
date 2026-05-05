@@ -177,3 +177,10 @@ func resolveDbwTag(tag string) map[string]string {
 	}
 	return result
 }
+
+// ResolveDbwTag parses a dbw struct tag string into a key-value map.
+// It returns the same result as the internal parser, exported for use in EntityHook.
+// Example: `dbw:"primaryKey;idGenerator:uuid"` → {"primaryKey":"true","idGenerator":"uuid"}
+func ResolveDbwTag(tag string) map[string]string {
+	return resolveDbwTag(tag)
+}

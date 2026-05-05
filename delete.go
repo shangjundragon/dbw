@@ -10,6 +10,9 @@ func (q *DbWrapper[T]) Delete() (sql.Result, error) {
 	if len(q.wheres) == 0 {
 		return nil, ErrNoWhereClause
 	}
+	if err := q.callEntityHook(HookBeforeDelete, nil); err != nil {
+		return nil, err
+	}
 	if err := q.callBeforeDelete(); err != nil {
 		return nil, err
 	}
@@ -26,6 +29,9 @@ func (q *DbWrapper[T]) Delete() (sql.Result, error) {
 		return nil, fmt.Errorf("delete failed: %w", err)
 	}
 	if err := q.callAfterDelete(result); err != nil {
+		return nil, err
+	}
+	if err := q.callEntityHook(HookAfterDelete, nil); err != nil {
 		return nil, err
 	}
 	return result, nil

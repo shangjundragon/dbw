@@ -1,10 +1,41 @@
 package dbw
 
 import (
+	"context"
 	"database/sql"
 	"reflect"
 	"sync"
 )
+
+type HookPoint int
+
+const (
+	HookBeforeInsert HookPoint = iota
+	HookAfterInsert
+	HookBeforeUpdate
+	HookBeforeUpdateMap
+	HookAfterUpdate
+	HookBeforeDelete
+	HookAfterDelete
+	HookAfterQuery
+)
+
+type EntityHook func(ctx context.Context, point HookPoint, entity any) error
+
+var globalEntityHooks []EntityHook
+
+func RegisterEntityHook(hook EntityHook) {
+	globalEntityHooks = append(globalEntityHooks, hook)
+}
+
+func (q *DbWrapper[T]) callEntityHook(point HookPoint, entity any) error {
+	for _, hook := range globalEntityHooks {
+		if err := hook(q.ctx, point, entity); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 type Hooks[T any] struct {
 	BeforeInsert    func(q *DbWrapper[T], data *T) error

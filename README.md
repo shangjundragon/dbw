@@ -413,34 +413,38 @@ dbw.SetSnowflakeMachineId(5) // 设置机器 ID（默认 1），需在首次 Get
 
 ## 生命周期钩子
 
-提供在执行 Insert、Update、Delete、Select 操作时的回调点，支持**全局注册**和**实例级注入**两种方式，常用于写入修改者/创建者、审计日志等场景。
+提供在执行 Insert、Update、Delete、Select 操作时的回调点，支持**类型泛型钩子**和**通用实体钩子**两种机制。
 
-### Hook 类型
+### 类型泛型钩子（Hooks[T]）
+
+绑定到特定实体类型，支持**全局注册**和**实例级注入**，常用于 AOP 拦截。
+
+#### Hook 类型
 
 | 钩子 | 触发时机 | 签名 |
 |------|---------|------|
-| `BeforeInsert` | Insert 执行前 | `func(ctx, *T) error` |
-| `AfterInsert` | Insert 成功后 | `func(ctx, *T, sql.Result) error` |
-| `BeforeUpdate` | UpdateById 执行前 | `func(ctx, *T) error` |
-| `BeforeUpdateMap` | Update(map) 执行前 | `func(ctx, map[string]any) error` |
-| `AfterUpdate` | Update/UpdateById 成功后 | `func(ctx, sql.Result) error` |
-| `BeforeDelete` | Delete 执行前 | `func(ctx) error` |
-| `AfterDelete` | Delete 成功后 | `func(ctx, sql.Result) error` |
-| `AfterQuery` | Select 每行扫描后 | `func(ctx, *T) error` |
+| `BeforeInsert` | Insert 执行前 | `func(q *DbWrapper[T], data *T) error` |
+| `AfterInsert` | Insert 成功后 | `func(q *DbWrapper[T], data *T, result sql.Result) error` |
+| `BeforeUpdate` | UpdateById 执行前 | `func(q *DbWrapper[T], data *T) error` |
+| `BeforeUpdateMap` | Update(map) 执行前 | `func(q *DbWrapper[T], values map[string]any) error` |
+| `AfterUpdate` | Update/UpdateById 成功后 | `func(q *DbWrapper[T], result sql.Result) error` |
+| `BeforeDelete` | Delete 执行前 | `func(q *DbWrapper[T]) error` |
+| `AfterDelete` | Delete 成功后 | `func(q *DbWrapper[T], result sql.Result) error` |
+| `AfterQuery` | Select 每行扫描后 | `func(q *DbWrapper[T], data *T) error` |
 
 所有钩子均为可选（nil 跳过），返回 error 时中断当前操作。
 
-### 全局注册
+#### 全局注册（RegisterHooks）
 
-进程级生效，适合设置全局基线行为（如自动填充创建人）：
+进程级生效，适合设置全局基线行为：
 
 ```go
 dbw.RegisterHooks[User](func(h *dbw.Hooks[User]) {
-    h.BeforeInsert = func(ctx context.Context, data *User) error {
-        data.NickName = getCurrentUser(ctx)
+    h.BeforeInsert = func(q *dbw.DbWrapper[User], data *User) error {
+        data.NickName = getCurrentUser(q.Ctx())
         return nil
     }
-    h.AfterQuery = func(ctx context.Context, data *User) error {
+    h.AfterQuery = func(q *dbw.DbWrapper[User], data *User) error {
         data.Password = "***" // 返回时脱敏
         return nil
     }
@@ -449,22 +453,71 @@ dbw.RegisterHooks[User](func(h *dbw.Hooks[User]) {
 
 多次调用 `RegisterHooks[T]` 会合并到同一个 `Hooks[T]`，适合在不同模块中分步注册。
 
-### 实例级注入
+#### 实例级注入（WithHooks）
 
-只对当前 `DbWrapper` 实例生效，优先级高于全局钩子（先执行全局，再执行实例）：
+只对当前 `DbWrapper` 实例生效，优先级高于全局 `Hooks[T]`：
 
 ```go
 dbw.New[User](dbw.WithConfig(config), dbw.WithHooks(func(h *dbw.Hooks[User]) {
-    h.BeforeInsert = func(ctx context.Context, data *User) error {
+    h.BeforeInsert = func(q *dbw.DbWrapper[User], data *User) error {
         data.Username = strings.ToLower(data.Username)
         return nil
     }
 }))
 ```
 
-### 执行顺序
+### 通用实体钩子（EntityHook）
 
-全局钩子 → 实例钩子（同一 hook point 两者都执行）。实例钩子未设置的 hook point 保留全局行为。
+不绑定具体类型，对所有实体类型生效。通过反射检查字段或 tag，适合通用的自动填充逻辑（如从 Context 中获取用户 ID 写入 `create_by` 字段）：
+
+```go
+dbw.RegisterEntityHook(func(ctx context.Context, point dbw.HookPoint, entity any) error {
+    if point != dbw.HookBeforeInsert && point != dbw.HookBeforeUpdate {
+        return nil
+    }
+    v := reflect.ValueOf(entity).Elem()
+    t := v.Type()
+    for i := 0; i < t.NumField(); i++ {
+        tagMap := dbw.ResolveDbwTag(t.Field(i).Tag.Get("dbw"))
+        if tagMap["autoCreateUser"] == "true" || tagMap["autoUpdateUser"] == "true" {
+            v.Field(i).Set(reflect.ValueOf(ctx.Value("user_id")))
+        }
+    }
+    return nil
+})
+```
+
+配合 tag 使用：
+
+```go
+type Entity struct {
+    Id       int64  `dbw:"primaryKey"`
+    Name     string
+    CreateBy int64  `dbw:"autoCreateUser"`
+    UpdateBy int64  `dbw:"autoUpdateUser"`
+}
+```
+
+`RegisterEntityHook` 支持多次调用，所有注册的钩子按注册顺序执行。
+
+### 执行顺序（完整链路）
+
+```
+EntityHook → 全局 Hooks[T] → 实例 Hooks[T]
+```
+
+以 Insert 为例：
+
+```
+1. beforeInsert (自动填充主键/时间戳)
+2. EntityHook(HookBeforeInsert, data)  ← 通用
+3. Hooks[T] BeforeInsert (全局)         ← 类型特定
+4. Hooks[T] BeforeInsert (实例)         ← 实例覆盖
+5. 构建 SQL + 执行
+6. Hooks[T] AfterInsert (实例)
+7. Hooks[T] AfterInsert (全局)
+8. EntityHook(HookAfterInsert, data)
+```
 
 ### 错误传播
 
@@ -473,16 +526,13 @@ dbw.New[User](dbw.WithConfig(config), dbw.WithHooks(func(h *dbw.Hooks[User]) {
 - After 钩子返回 error → SQL 已执行（无法回滚，除非在事务中）
 
 ```go
-dbw.New[User](config, dbw.WithHooks(func(h *dbw.Hooks[User]) {
-    h.BeforeInsert = func(ctx context.Context, data *User) error {
-        if data.Username == "" {
-            return fmt.Errorf("username is required")
-        }
-        return nil
+dbw.RegisterEntityHook(func(ctx context.Context, point dbw.HookPoint, entity any) error {
+    v := reflect.ValueOf(entity).Elem()
+    if v.FieldByName("Username").String() == "" {
+        return fmt.Errorf("username is required")
     }
-}))
-_, err := dbw.New[User](config).Insert(&User{})
-// err: "username is required"
+    return nil
+})
 ```
 
 ## 标签参考
@@ -605,7 +655,7 @@ dbw/
 ├── meta.go             # 结构体元数据 + 标签解析
 ├── table.go            # 表名生成 + Tabler 接口
 ├── snowflake.go        # Snowflake ID 生成器
-├── hooks.go            # 生命周期钩子（Hooks[T], RegisterHooks, WithHooks）
+├── hooks.go            # 生命周期钩子（Hooks[T], RegisterHooks, WithHooks, EntityHook, RegisterEntityHook）
 ├── errors.go           # 结构化错误类型
 ├── log.go              # 日志系统
 ├── convert.go          # 默认值转换 + 时间处理

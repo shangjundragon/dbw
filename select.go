@@ -186,6 +186,9 @@ func (q *DbWrapper[T]) scanRowsToTypeSlice(rows *sql.Rows) ([]T, error) {
 		if err := q.callAfterQuery(&data); err != nil {
 			return nil, err
 		}
+		if err := q.callEntityHook(HookAfterQuery, &data); err != nil {
+			return nil, err
+		}
 		results = append(results, data)
 	}
 	if err := rows.Err(); err != nil {

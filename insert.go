@@ -53,9 +53,10 @@ func (q *DbWrapper[T]) Insert(data *T) (sql.Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("before insert: %w", err)
 	}
-	if err := q.callBeforeInsert(data); err != nil {
+	if err := q.callEntityHook(HookBeforeInsert, data); err != nil {
 		return nil, err
 	}
+
 	columns := make([]string, 0, len(q.meta.fieldsInfoMap))
 	placeholders := make([]string, 0, len(q.meta.fieldsInfoMap))
 	args := make([]any, 0, len(q.meta.fieldsInfoMap))
@@ -74,6 +75,9 @@ func (q *DbWrapper[T]) Insert(data *T) (sql.Result, error) {
 	}
 	if len(columns) == 0 {
 		return nil, fmt.Errorf("%w: table %s", ErrNoFieldsToUpdate, q.getTableName())
+	}
+	if err := q.callBeforeInsert(data); err != nil {
+		return nil, err
 	}
 	sqlStr := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", q.getTableName(), strings.Join(columns, ", "), strings.Join(placeholders, ", "))
 	if q.config.Dialect.DriverName() != "mysql" && q.config.Dialect.DriverName() != "sqlite" {
@@ -97,6 +101,9 @@ func (q *DbWrapper[T]) Insert(data *T) (sql.Result, error) {
 		fmt.Printf("[DEBUG] Generated ID: %v\n", generatedId)
 	}
 	if err := q.callAfterInsert(data, result); err != nil {
+		return nil, err
+	}
+	if err := q.callEntityHook(HookAfterInsert, data); err != nil {
 		return nil, err
 	}
 	return result, nil

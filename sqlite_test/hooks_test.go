@@ -1,9 +1,13 @@
 package sqlite_test
 
 import (
+	"context"
+	"database/sql"
 	"errors"
+	"reflect"
 	"testing"
 
+	_ "github.com/glebarez/go-sqlite"
 	"github.com/shangjundragon/dbw"
 )
 
@@ -209,4 +213,184 @@ func TestHooksGlobalAndInstance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cleanup delete failed: %v", err)
 	}
+}
+
+func TestEntityHookBeforeInsert(t *testing.T) {
+	dbw.RegisterEntityHook(func(ctx context.Context, point dbw.HookPoint, entity any) error {
+		if point != dbw.HookBeforeInsert || entity == nil {
+			return nil
+		}
+		v := reflect.ValueOf(entity).Elem()
+		tp := v.Type()
+		for i := 0; i < tp.NumField(); i++ {
+			tagMap := dbw.ResolveDbwTag(tp.Field(i).Tag.Get("dbw"))
+			if tagMap["autoCreateUser"] == "true" {
+				v.Field(i).Set(reflect.ValueOf(int64(42)))
+			}
+		}
+		return nil
+	})
+
+	type EntityWithCreateBy struct {
+		ID       int64 `dbw:"primaryKey"`
+		Name     string
+		CreateBy int64 `dbw:"autoCreateUser"`
+	}
+
+	db, cfg := newTestDB(t)
+	defer db.Close()
+
+	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS entity_with_create_by (
+		id INTEGER PRIMARY KEY,
+		name TEXT,
+		create_by INTEGER
+	)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wrapper := dbw.New[EntityWithCreateBy](dbw.WithConfig(cfg))
+	data := &EntityWithCreateBy{Name: "test_create"}
+	_, err = wrapper.Insert(data)
+	if err != nil {
+		t.Fatalf("insert failed: %v", err)
+	}
+	if data.CreateBy != 42 {
+		t.Errorf("EntityHook BeforeInsert not called, got CreateBy=%d", data.CreateBy)
+	}
+}
+
+func TestEntityHookBeforeUpdate(t *testing.T) {
+	dbw.RegisterEntityHook(func(ctx context.Context, point dbw.HookPoint, entity any) error {
+		if point != dbw.HookBeforeUpdate || entity == nil {
+			return nil
+		}
+		v := reflect.ValueOf(entity).Elem()
+		tp := v.Type()
+		for i := 0; i < tp.NumField(); i++ {
+			tagMap := dbw.ResolveDbwTag(tp.Field(i).Tag.Get("dbw"))
+			if tagMap["autoUpdateUser"] == "true" {
+				v.Field(i).Set(reflect.ValueOf(int64(99)))
+			}
+		}
+		return nil
+	})
+
+	type EntityWithUpdateBy struct {
+		ID       int64 `dbw:"primaryKey"`
+		Name     string
+		UpdateBy int64 `dbw:"autoUpdateUser"`
+	}
+
+	db, cfg := newTestDB(t)
+	defer db.Close()
+
+	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS entity_with_update_by (
+		id INTEGER PRIMARY KEY,
+		name TEXT,
+		update_by INTEGER
+	)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wrapper := dbw.New[EntityWithUpdateBy](dbw.WithConfig(cfg))
+	data := &EntityWithUpdateBy{Name: "test_update"}
+	_, err = wrapper.Insert(data)
+	if err != nil {
+		t.Fatalf("insert failed: %v", err)
+	}
+
+	data.Name = "updated"
+	_, err = wrapper.UpdateById(data)
+	if err != nil {
+		t.Fatalf("update failed: %v", err)
+	}
+	if data.UpdateBy != 99 {
+		t.Errorf("EntityHook BeforeUpdate not called, got UpdateBy=%d", data.UpdateBy)
+	}
+}
+
+func TestEntityHookErrorPropagation(t *testing.T) {
+	wantErr := errors.New("entity hook error")
+
+	type SimpleEntity struct {
+		ID   int64 `dbw:"primaryKey"`
+		Name string
+	}
+
+	dbw.RegisterEntityHook(func(ctx context.Context, point dbw.HookPoint, entity any) error {
+		if point == dbw.HookBeforeInsert {
+			if _, ok := entity.(*SimpleEntity); ok {
+				return wantErr
+			}
+		}
+		return nil
+	})
+
+	db, cfg := newTestDB(t)
+	defer db.Close()
+
+	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS simple_entity (
+		id INTEGER PRIMARY KEY,
+		name TEXT
+	)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wrapper := dbw.New[SimpleEntity](dbw.WithConfig(cfg))
+	_, err = wrapper.Insert(&SimpleEntity{Name: "test"})
+	if !errors.Is(err, wantErr) {
+		t.Errorf("expected entity hook error, got %v", err)
+	}
+}
+
+func TestEntityHookOrderBeforeHooksT(t *testing.T) {
+	steps := ""
+	dbw.RegisterEntityHook(func(ctx context.Context, point dbw.HookPoint, entity any) error {
+		if point == dbw.HookBeforeInsert {
+			steps += ":entity"
+		}
+		return nil
+	})
+
+	dbw.RegisterHooks[User](func(h *dbw.Hooks[User]) {
+		h.BeforeInsert = func(q *dbw.DbWrapper[User], data *User) error {
+			steps += ":hooks_t"
+			return nil
+		}
+	})
+	defer dbw.RegisterHooks[User](func(h *dbw.Hooks[User]) {
+		h.BeforeInsert = nil
+	})
+
+	wrapper := dbw.New[User](dbw.WithConfig(testConfig))
+	data := &User{Username: "test_order", Age: 20}
+	_, err := wrapper.Insert(data)
+	if err != nil {
+		t.Fatalf("insert failed: %v", err)
+	}
+	if steps != ":entity:hooks_t" {
+		t.Errorf("wrong order, got %q", steps)
+	}
+
+	cleanWrapper := dbw.New[User](dbw.WithConfig(testConfig))
+	_, err = cleanWrapper.Eq("id", data.Id).Delete()
+	if err != nil {
+		t.Fatalf("cleanup delete failed: %v", err)
+	}
+}
+
+func newTestDB(t *testing.T) (*sql.DB, *dbw.Config) {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:hooks_entity_test.db?cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := dbw.NewConfig(func(c *dbw.Config) {
+		c.Db = db
+		c.DriverName = "sqlite"
+	})
+	return db, cfg
 }
