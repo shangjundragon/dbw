@@ -479,8 +479,8 @@ dbw.RegisterEntityHook(func(ctx context.Context, point dbw.HookPoint, entity any
     t := v.Type()
     for i := 0; i < t.NumField(); i++ {
         tagMap := dbw.ResolveDbwTag(t.Field(i).Tag.Get("dbw"))
-        if tagMap["autoCreateUser"] == "true" || tagMap["autoUpdateUser"] == "true" {
-            v.Field(i).Set(reflect.ValueOf(ctx.Value("user_id")))
+        if tagMap["createBy"] == "true" || tagMap["updateBy"] == "true" {
+            dbw.SetFieldValue(v.Field(i), ctx.Value("user_id"))
         }
     }
     return nil
