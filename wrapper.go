@@ -25,6 +25,7 @@ type DbWrapper[T any] struct {
 	rawSQL    string
 	rawArgs   []any
 	meta      *structMeta
+	hooks     any
 }
 
 // Options is a functional option for configuring a DbWrapper.

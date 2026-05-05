@@ -16,6 +16,9 @@ func (q *DbWrapper[T]) UpdateById(data *T) (sql.Result, error) {
 	args := make([]any, 0)
 	b.WriteString("UPDATE " + q.getTableName() + " SET ")
 	sets := make([]string, 0, len(q.meta.fieldsInfoMap))
+	if err := q.callBeforeUpdate(data); err != nil {
+		return nil, err
+	}
 	elem := reflect.ValueOf(data).Elem()
 	setCount := 0
 	appendSet := func(colName string, arg any) {
@@ -81,6 +84,9 @@ func (q *DbWrapper[T]) UpdateById(data *T) (sql.Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := q.callAfterUpdate(result); err != nil {
+		return nil, err
+	}
 	return result, nil
 }
 
@@ -91,6 +97,9 @@ func (q *DbWrapper[T]) Update(values map[string]any) (sql.Result, error) {
 	}
 	if len(q.wheres) == 0 {
 		return nil, ErrNoWhereClause
+	}
+	if err := q.callBeforeUpdateMap(values); err != nil {
+		return nil, err
 	}
 	if q.meta.autoUpdateTimeDbColumn != "" {
 		if q.meta.autoUpdateTimeTagValue == "milli" {
@@ -109,6 +118,9 @@ func (q *DbWrapper[T]) Update(values map[string]any) (sql.Result, error) {
 		result, err = q.tx.ExecContext(q.ctx, sqlStr, args...)
 	}
 	if err != nil {
+		return nil, err
+	}
+	if err := q.callAfterUpdate(result); err != nil {
 		return nil, err
 	}
 	return result, nil

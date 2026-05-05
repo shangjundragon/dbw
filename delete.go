@@ -10,6 +10,9 @@ func (q *DbWrapper[T]) Delete() (sql.Result, error) {
 	if len(q.wheres) == 0 {
 		return nil, ErrNoWhereClause
 	}
+	if err := q.callBeforeDelete(); err != nil {
+		return nil, err
+	}
 	sqlStr, args := q.buildDeleteSQL()
 	debugLog(q.config, q.ctx, sqlStr, args)
 	var result sql.Result
@@ -21,6 +24,9 @@ func (q *DbWrapper[T]) Delete() (sql.Result, error) {
 	}
 	if err != nil {
 		return nil, fmt.Errorf("delete failed: %w", err)
+	}
+	if err := q.callAfterDelete(result); err != nil {
+		return nil, err
 	}
 	return result, nil
 }

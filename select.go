@@ -182,7 +182,11 @@ func (q *DbWrapper[T]) scanRowsToTypeSlice(rows *sql.Rows) ([]T, error) {
 		if err := rows.Scan(scanValues...); err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
-		results = append(results, result.Interface().(T))
+		data := result.Interface().(T)
+		if err := q.callAfterQuery(&data); err != nil {
+			return nil, err
+		}
+		results = append(results, data)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("row iteration error: %w", err)

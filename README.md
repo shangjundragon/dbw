@@ -17,6 +17,7 @@
 - **条件性构建** — `WhereIf` / `AndIf` / `EqIf` / `LikeIf` 避免 `if-else` 嵌套
 - **原始 SQL** — `Raw()` + `SelectList()` / `Exec()` 执行任意 SQL
 - **结构体条件** — `WhereStruct(&user)` 非零字段自动转 WHERE
+- **生命周期钩子** — 全局/实例级 BeforeInsert、AfterInsert、BeforeUpdate、AfterUpdate、BeforeDelete、AfterDelete、AfterQuery
 - **零依赖** — 核心库无第三方依赖（Snowflake 自实现）
 
 ## 安装
@@ -410,6 +411,80 @@ type File struct {
 dbw.SetSnowflakeMachineId(5) // 设置机器 ID（默认 1），需在首次 GetSnowflake 前调用
 ```
 
+## 生命周期钩子
+
+提供在执行 Insert、Update、Delete、Select 操作时的回调点，支持**全局注册**和**实例级注入**两种方式，常用于写入修改者/创建者、审计日志等场景。
+
+### Hook 类型
+
+| 钩子 | 触发时机 | 签名 |
+|------|---------|------|
+| `BeforeInsert` | Insert 执行前 | `func(ctx, *T) error` |
+| `AfterInsert` | Insert 成功后 | `func(ctx, *T, sql.Result) error` |
+| `BeforeUpdate` | UpdateById 执行前 | `func(ctx, *T) error` |
+| `BeforeUpdateMap` | Update(map) 执行前 | `func(ctx, map[string]any) error` |
+| `AfterUpdate` | Update/UpdateById 成功后 | `func(ctx, sql.Result) error` |
+| `BeforeDelete` | Delete 执行前 | `func(ctx) error` |
+| `AfterDelete` | Delete 成功后 | `func(ctx, sql.Result) error` |
+| `AfterQuery` | Select 每行扫描后 | `func(ctx, *T) error` |
+
+所有钩子均为可选（nil 跳过），返回 error 时中断当前操作。
+
+### 全局注册
+
+进程级生效，适合设置全局基线行为（如自动填充创建人）：
+
+```go
+dbw.RegisterHooks[User](func(h *dbw.Hooks[User]) {
+    h.BeforeInsert = func(ctx context.Context, data *User) error {
+        data.NickName = getCurrentUser(ctx)
+        return nil
+    }
+    h.AfterQuery = func(ctx context.Context, data *User) error {
+        data.Password = "***" // 返回时脱敏
+        return nil
+    }
+})
+```
+
+多次调用 `RegisterHooks[T]` 会合并到同一个 `Hooks[T]`，适合在不同模块中分步注册。
+
+### 实例级注入
+
+只对当前 `DbWrapper` 实例生效，优先级高于全局钩子（先执行全局，再执行实例）：
+
+```go
+dbw.New[User](dbw.WithConfig(config), dbw.WithHooks(func(h *dbw.Hooks[User]) {
+    h.BeforeInsert = func(ctx context.Context, data *User) error {
+        data.Username = strings.ToLower(data.Username)
+        return nil
+    }
+}))
+```
+
+### 执行顺序
+
+全局钩子 → 实例钩子（同一 hook point 两者都执行）。实例钩子未设置的 hook point 保留全局行为。
+
+### 错误传播
+
+任意钩子返回 error 会中断操作：
+- Before 钩子返回 error → SQL 不执行
+- After 钩子返回 error → SQL 已执行（无法回滚，除非在事务中）
+
+```go
+dbw.New[User](config, dbw.WithHooks(func(h *dbw.Hooks[User]) {
+    h.BeforeInsert = func(ctx context.Context, data *User) error {
+        if data.Username == "" {
+            return fmt.Errorf("username is required")
+        }
+        return nil
+    }
+}))
+_, err := dbw.New[User](config).Insert(&User{})
+// err: "username is required"
+```
+
 ## 标签参考
 
 标签分隔符为 `;`，如 `dbw:"primaryKey;idGenerator:uuid"`。
@@ -530,7 +605,7 @@ dbw/
 ├── meta.go             # 结构体元数据 + 标签解析
 ├── table.go            # 表名生成 + Tabler 接口
 ├── snowflake.go        # Snowflake ID 生成器
-├── generator.go        # ID 生成器注册表
+├── hooks.go            # 生命周期钩子（Hooks[T], RegisterHooks, WithHooks）
 ├── errors.go           # 结构化错误类型
 ├── log.go              # 日志系统
 ├── convert.go          # 默认值转换 + 时间处理
